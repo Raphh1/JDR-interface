@@ -463,8 +463,19 @@ io.on('connection', (socket: Socket) => {
     }
     io.to(advId!).emit('ai:thinking', { on: true });
     try {
+      // État avant génération : sert à détecter si la réponse a réellement produit
+      // quelque chose d'exploitable (récit, classes, titre, lieu).
+      const before = { story: adv.story.length, classes: adv.classPool.length, title: adv.title, loc: adv.startLocation };
       const reply = await ai.generate(advId!, adv.ai?.model);
+      // Log de diagnostic : la réponse brute du modèle (utile si le format n'est pas suivi).
+      console.log(`[ai:generate] modèle=${adv.ai?.model || '?'} — réponse brute (${reply.length} car.) :\n${reply.slice(0, 1200)}\n---`);
       relayNarration(advId!, reply);
+      const fresh = store.get(advId!)!;
+      const produced = fresh.story.length > before.story || fresh.classPool.length !== before.classes
+        || fresh.title !== before.title || fresh.startLocation !== before.loc;
+      if (!produced) {
+        io.to(advId!).emit('notice', { error: "L'IA a répondu mais sans bloc exploitable (@titre/@lieu/@classes au lancement, ou @récit). Réessaie — le modèle local suit parfois mal le format." });
+      }
     } catch (e) {
       io.to(advId!).emit('ai:error', { error: `IA non disponible (${(e as Error).message}) — continuez dans votre chat Claude habituel.` });
     } finally {

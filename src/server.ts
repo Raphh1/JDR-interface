@@ -164,6 +164,8 @@ function applyAndBroadcast(advId: string, raw: string): { clean: string } {
 function activeCharacters(adv: Adventure) {
   return adv.characters.filter((c) => c.charClass);
 }
+// Comparaison de propriété tolérante (casse/espaces) — cohérente avec gmsync.matchChar.
+const sameOwner = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 io.on('connection', (socket: Socket) => {
   // Sur une reconnexion récupérée (connectionStateRecovery), `socket.data` est restauré :
@@ -219,7 +221,7 @@ io.on('connection', (socket: Socket) => {
     if (!adv) return;
     const c = adv.characters.find((x) => x.id === characterId);
     if (!c) return;
-    if (c.playerName !== playerName) return;  // propriété : pas le sien → ignoré
+    if (!sameOwner(c.playerName, playerName)) return;  // propriété : pas le sien → ignoré
     for (const key of ['name', 'notes'] as const) {
       if (typeof patch[key] === 'string') c[key] = patch[key];
     }
@@ -244,7 +246,7 @@ io.on('connection', (socket: Socket) => {
     const c = adv.characters.find((x) => x.id === characterId);
     const cls = adv.classPool.find((x: ClassDef) => x.id === classId);
     if (!c || !cls) return;
-    if (c.playerName !== playerName) return;  // on ne pioche que pour son propre personnage
+    if (!sameOwner(c.playerName, playerName)) return;  // on ne pioche que pour son propre personnage
     c.charClass = cls.name;
     // Stats de départ = base 10 + valeurs de la classe.
     for (const stat of adv.statTemplate) if (!(stat in c.stats)) c.stats[stat] = 10;

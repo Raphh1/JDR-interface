@@ -12,7 +12,8 @@ TypeScript, persistance en fichiers JSON locaux.
 - IA **optionnelle** : `@anthropic-ai/sdk` + `dotenv` en `optionalDependencies` (chargés en lazy).
 - `npm start` → `npm run build` (tsc backend + tsc client) puis `node dist/server.js`.
 - `npm run dev` → `tsx watch src/server.ts` (hot reload backend uniquement).
-- Pas de tests automatisés, pas de linter configuré. Recette = manuelle, multi-PC.
+- Tests de non-régression : `npm test` (node:test via `tsx`, 0 dépendance). Couvre le code pur
+  (`gmsync`, `presence`, `store`). Pas de linter. Recette temps réel = manuelle, multi-PC.
 
 ## Carte du code
 - `src/server.ts` — Express (REST + statique) **et** tout le hub Socket.io (`io.on('connection')`).
@@ -86,11 +87,11 @@ wifi/veille, redémarrage serveur.
   renvoie `{clean, applied[], title, startLocation, classes[]}`. Côté client, le relais passe par
   `requestNarration` → modale `#preview-modal` (changements détectés + narration) → confirmer diffuse via
   `story:narration`. Si rien n'est détecté, message explicite (le MJ voit que son @maj est mal formé). 0 token.
-- **P2 — Multi-onglets / présences fantômes** : même `playerName` (localStorage) sur 2 onglets =
-  2 sockets agissant comme le même perso. Lié à la double socket ci-dessus.
-- **P2 — Pas de contrôle de propriété des fiches** : `character:update` (`server.ts:187`) laisse
-  n'importe qui éditer n'importe quelle fiche (le commentaire prétend l'inverse). Acceptable en LAN
-  de confiance, à corriger avec la présence autoritative.
+- **✅ FAIT — Multi-onglets / présences fantômes** : présence autoritative `src/presence.ts`
+  (Map advId→socketId, noms uniques dédupliqués), diffusée via `presence:list` au join/disconnect,
+  affichée dans la topbar (`#present-list`).
+- **✅ FAIT — Contrôle de propriété des fiches** : `character:update` et `class:pick` vérifient
+  `c.playerName === playerName` (un joueur n'édite/pioche que son perso ; le MJ passe par `@maj`).
 - **✅ FAIT — `adv.ai` non défensif** : accès robustifiés (serveur `ai:setModel` recrée `adv.ai` si
   absent ; client `ai:model` et select Paramètres en `?.`). Plus de crash sur une vieille aventure sans `ai`.
 - `maxHttpBufferSize: 8e6` (`server.ts:24`) : la galerie passe par REST, pas par le socket — réglage
@@ -128,7 +129,8 @@ futur petit interrupteur dans Paramètres.
 - **1 mois** : ✅ `connectionStateRecovery` + fallback · ✅ robustesse `adv.ai` · ✅ aperçu/diff `@maj` ·
   ✅ prompt/Projet LLM livré (`docs/MJ-PROMPT.md` = contrat de format durable à coller 1×, référencé
   dans le README ; complète le briefing par-aventure de `buildBriefing`) ·
-  ⬜ présence autoritative + propriété des fiches (gros refactor identité serveur — à cadrer).
+  ✅ présence autoritative (`src/presence.ts` + `presence:list`) + propriété des fiches.
+- **Tests** : ✅ `npm test` (node:test/tsx) sur `gmsync` / `presence` / `store`.
 - **3 mois** (si scope Internet) : extension pont navigateur, état versionné + identité joueur,
   exécutable unique/Docker, HTTPS + code de table.
 

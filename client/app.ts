@@ -243,7 +243,7 @@ function updateTitle() {
 // Socket
 // ===========================================================================
 function wireSocket(socket: any) {
-  socket.on('dice:result', (roll: Roll) => { if (!state.adv) return; state.adv.rolls.push(roll); showDiceResult(roll); renderDiceHistory(); });
+  socket.on('dice:result', (roll: Roll) => { if (!state.adv) return; if (state.adv.rolls.some((r) => r.id === roll.id)) return; state.adv.rolls.push(roll); showDiceResult(roll); renderDiceHistory(); });
   socket.on('character:updated', (c: Character) => {
     if (!state.adv) return;
     const i = state.adv.characters.findIndex((x) => x.id === c.id);
@@ -263,7 +263,7 @@ function wireSocket(socket: any) {
     if (title) toast('📜 ' + title);
   });
   socket.on('sheets:synced', () => { renderPlayers(); });
-  socket.on('story:add', (turn: StoryTurn) => { if (!state.adv) return; state.adv.story.push(turn); appendStory(turn); });
+  socket.on('story:add', (turn: StoryTurn) => { if (!state.adv) return; if (state.adv.story.some((t) => t.id === turn.id)) return; state.adv.story.push(turn); appendStory(turn); });
   socket.on('action:submitted', (s: ActionSubmission) => {
     if (!state.adv) return;
     if (!state.adv.actionRound.submissions.some((x) => x.characterId === s.characterId)) state.adv.actionRound.submissions.push(s);
@@ -275,7 +275,7 @@ function wireSocket(socket: any) {
     state.adv.actionRound = round; renderActionBoard(); updateActionButton();
     $('#round-block').classList.add('hidden');
   });
-  socket.on('gallery:add', (item: GalleryItem) => { if (!state.adv) return; state.adv.gallery.push(item); renderGallery(); });
+  socket.on('gallery:add', (item: GalleryItem) => { if (!state.adv) return; if (state.adv.gallery.some((g) => g.id === item.id)) return; state.adv.gallery.push(item); renderGallery(); });
   socket.on('gallery:remove', ({ id }: { id: string }) => { if (!state.adv) return; state.adv.gallery = state.adv.gallery.filter((g) => g.id !== id); renderGallery(); });
   socket.on('ai:thinking', ({ on }: { on: boolean }) => setThinking(on));
   socket.on('ai:error', ({ error }: { error: string }) => toast(error));

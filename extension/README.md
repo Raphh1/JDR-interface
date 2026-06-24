@@ -8,12 +8,18 @@ affiché dans ton chat).
 
 Sur la page de ton LLM, un petit panneau « 🎲 Pont MJ » apparaît en bas à droite :
 
-- **📥 Récupérer les actions** : insère le bloc d'actions des joueurs (du tour courant)
-  directement dans le champ de saisie du LLM.
-- **📤 Envoyer la réponse à la table** : lit le dernier message de l'assistant et le diffuse
-  à la table (applique les blocs `@maj`, ajoute au récit, met à jour les fiches en direct).
+- **📥 Récupérer les actions** : **copie** le bloc d'actions des joueurs dans le presse-papier
+  (colle-le dans le chat avec **Ctrl+V**) — et tente aussi de l'insérer automatiquement.
+- **📤 Envoyer à la table** : **sélectionne la réponse du MJ** dans le chat (glisser, ou
+  triple-clic) puis clique → elle est diffusée à la table (applique `@maj`, met à jour les
+  fiches en direct). Si rien n'est sélectionné, l'extension tente d'auto-détecter le dernier
+  message de l'assistant.
 
-La boucle MJ devient : *cliquer 📥 → envoyer au LLM → cliquer 📤*. Zéro copier-coller.
+La boucle MJ devient : *📥 → Ctrl+V dans le LLM → sélectionner la réponse → 📤*. Pas de copie
+manuelle de la réponse.
+
+> **Pourquoi sélectionner ?** C'est la méthode la plus fiable : elle marche sur **n'importe
+> quel site** sans dépendre du HTML, qui change souvent. L'auto-détection reste un confort.
 
 ## Installation (Chrome / Edge / Brave)
 
@@ -37,9 +43,11 @@ CORS permissif — rien à configurer, ils sont actifs par défaut.
 
 - **« App injoignable »** : vérifie l'URL et que le serveur tourne ; en LAN, utilise l'IP
   affichée sur l'accueil (pas `localhost` si le LLM tourne sur une autre machine).
-- **📤 récupère un texte vide / 📥 n'insère rien** : les sites LLM changent souvent leur
-  HTML. Mets à jour les sélecteurs dans `content.js` (objet `SITES`) ; la console du
-  navigateur affiche un avertissement quand un sélecteur ne matche plus.
+- **📤 « sélectionne la réponse »** : l'auto-détection n'a rien trouvé → **sélectionne le
+  texte** de la réponse dans le chat, puis re-clique (méthode fiable, indépendante du HTML).
+- **📥 n'insère pas dans le champ** : pas grave, le bloc est dans le **presse-papier** →
+  **Ctrl+V** dans le chat. (Pour fiabiliser l'insertion auto, mets à jour `composer` dans
+  l'objet `SITES` de `content.js`.)
 - **Rien ne s'affiche** : confirme que l'URL du site est dans `manifest.json` (`content_scripts.matches`).
 
 ## Confidentialité

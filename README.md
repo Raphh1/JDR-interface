@@ -28,6 +28,10 @@ Toute action (dé, fiche, combat) se propage **instantanément** à tous les jou
 > Pour qu'il respecte toujours le format attendu par l'app, collez **une seule fois** les
 > instructions de [`docs/MJ-PROMPT.md`](docs/MJ-PROMPT.md) dans votre Projet Claude / GPT / Gem.
 > Coût : **zéro token côté app**.
+>
+> 🔌 **Sans copier-coller** (optionnel) : l'[extension navigateur](extension/README.md) relaie
+> les réponses de Claude/ChatGPT/Gemini vers la table en un clic (0 token), ou pilotez la table
+> depuis un client MCP comme Claude Desktop via le [serveur MCP](mcp/README.md).
 
 ## Stack
 

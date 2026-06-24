@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font: 13px/1.5 system-ui, sans-serif; width: 280px; margin: 0; padding: 14px; background: #1f1b1c; color: #f4f1ea; }
+    h1 { font-size: 15px; margin: 0 0 10px; }
+    label { display: block; margin: 8px 0 3px; opacity: .85; }
+    input, select, button { width: 100%; box-sizing: border-box; padding: 7px; border-radius: 6px; border: 1px solid #555; background: #2a2624; color: #f4f1ea; }
+    button { background: #3a7; border: 0; color: #fff; font-weight: 600; cursor: pointer; margin-top: 10px; }
+    #status { margin-top: 10px; min-height: 16px; font-size: 12px; }
+    #status.ok { color: #8f8; } #status.err { color: #f99; }
+    .hint { font-size: 11px; opacity: .7; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <h1>🎲 Pont MJ — configuration</h1>
+  <label>Adresse de l'app (LAN)</label>
+  <input id="baseUrl" type="text" placeholder="http://192.168.1.15:3000" />
+  <div class="hint">L'adresse affichée sur l'accueil de l'app.</div>
+
+  <button id="connect">Connecter & lister les aventures</button>
+
+  <label>Aventure</label>
+  <select id="adventureId"><option value="">— connecte-toi d'abord —</option></select>
+
+  <button id="save">Enregistrer</button>
+  <div id="status"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

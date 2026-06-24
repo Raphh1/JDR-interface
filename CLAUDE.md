@@ -101,10 +101,24 @@ wifi/veille, redémarrage serveur.
 Boucle actuelle : LLM (chat perso du MJ) → copier → coller dans l'onglet relais → `gmsync` → monde.
 Contraintes produit : **0 token côté app**, **éviter l'IA serveur**, rester self-hosted, multi-LLM.
 - 0 token : aperçu/diff avant application + prompt/Projet LLM réutilisable fourni (anti-drift).
-- Anti copier-coller : extension navigateur / userscript pont (lit le dernier message de l'assistant
-  sur claude.ai/chatgpt/… et POST à l'app locale ; injecte le bloc d'actions en retour). Multi-LLM
-  via sélecteurs, 0 token.
+- **✅ FAIT — Anti copier-coller** : deux ponts s'appuyant sur des endpoints REST partagés.
 - `ai:generate` (clé serveur) existe déjà mais consomme des tokens → garder strictement opt-in.
+
+### Pont MJ — endpoints REST + extension + MCP (✅ fait)
+**Backend** (`server.ts`) : CORS permissif sur `/api`, + endpoints partagés :
+- `GET /api/adventures/:id/state` — état compact pour LLM (via `bridgeState`).
+- `GET /api/adventures/:id/actions` — bloc d'actions du tour (`actionBlock`/`roundComplete`).
+- `POST /api/adventures/:id/narration` — diffuse (via `relayNarration`, partagé avec le socket).
+- `POST /api/adventures/:id/narration/preview` — dry-run (`previewNarration`).
+Refactor : `relayNarration`/`previewNarration`/`actionBlock`/`roundComplete` factorisés et réutilisés
+par les handlers socket (`story:narration`, `story:preview`, `action:submit`, `ai:generate`).
+**`extension/`** : extension navigateur MV3 (vanilla, 0 dep). Content-script (lit le dernier
+message assistant + injecte le bloc d'actions) ↔ service-worker (fetch vers l'app, contourne
+mixed-content/CSP via host-permissions). Sélecteurs par site dans `content.js` (objet `SITES`) —
+**à mettre à jour quand claude.ai/chatgpt/gemini changent leur DOM**. 0 token.
+**`mcp/`** : serveur MCP isolé (deps propres : `@modelcontextprotocol/sdk` + `zod`, PAS dans l'app).
+Outils `table_state`/`pending_actions`/`preview_narration`/`post_narration`. Config par env
+`JDR_BASE_URL`/`JDR_ADVENTURE_ID`. Hors `tsconfig` (non compilé par l'app).
 
 ### MJ = joueur + relayeur (✅ fait, client only)
 Le rôle MJ est un **flag** `state.isMj` (localStorage `jdr-mj`), DÉCOUPLÉ du personnage : le MJ
@@ -131,8 +145,8 @@ futur petit interrupteur dans Paramètres.
   dans le README ; complète le briefing par-aventure de `buildBriefing`) ·
   ✅ présence autoritative (`src/presence.ts` + `presence:list`) + propriété des fiches.
 - **Tests** : ✅ `npm test` (node:test/tsx) sur `gmsync` / `presence` / `store`.
-- **3 mois** (si scope Internet) : extension pont navigateur, état versionné + identité joueur,
-  exécutable unique/Docker, HTTPS + code de table.
+- **3 mois** (si scope Internet) : ✅ extension pont navigateur (`extension/`) · ✅ serveur MCP (`mcp/`) ·
+  ⬜ état versionné + identité joueur · ⬜ exécutable unique/Docker · ⬜ HTTPS + code de table.
 
 ## Règles de travail
 - Audit/design demandés jusqu'ici sans modif de fichiers. Avant d'implémenter : confirmer le scope.

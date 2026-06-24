@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Compagnon JDR — Pont MJ",
+  "version": "1.0.0",
+  "description": "Relaie les réponses de ton LLM (Claude, ChatGPT, Gemini) vers ta table de JDR locale — sans copier-coller, sans token.",
+  "permissions": ["storage"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "action": { "default_popup": "popup.html", "default_title": "Pont MJ — configurer" },
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://claude.ai/*",
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -35,6 +35,18 @@ const io = new Server(server, {
 });
 
 app.use(express.json({ limit: '8mb' }));
+
+// CORS permissif sur l'API : permet au pont MJ (extension navigateur lancée sur
+// claude.ai/chatgpt.com…, bookmarklet, serveur MCP) d'appeler l'app locale. LAN de
+// confiance, sans auth — cohérent avec le reste du projet.
+app.use('/api', (req: Request, res: Response, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,DELETE,PATCH,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') { res.sendStatus(204); return; }
+  next();
+});
+
 app.use(express.static(PUBLIC_DIR));
 
 // ---------------------------------------------------------------------------
@@ -96,6 +108,38 @@ app.get('/api/network', (_req: Request, res: Response) => {
   res.json({ port: PORT, urls });
 });
 
+// ---------------------------------------------------------------------------
+// Pont MJ (extension navigateur / serveur MCP) — relaie le LLM sans copier-coller.
+// ---------------------------------------------------------------------------
+
+// État compact de l'aventure (contexte pour le LLM).
+app.get('/api/adventures/:id/state', (req: Request, res: Response) => {
+  const adv = store.get(req.params.id);
+  if (!adv) return res.status(404).json({ error: 'Aventure introuvable.' });
+  res.json(bridgeState(adv));
+});
+
+// Bloc d'actions du tour courant (à transmettre au LLM).
+app.get('/api/adventures/:id/actions', (req: Request, res: Response) => {
+  const adv = store.get(req.params.id);
+  if (!adv) return res.status(404).json({ error: 'Aventure introuvable.' });
+  res.json({ round: adv.actionRound.number, block: actionBlock(adv), complete: roundComplete(adv), count: adv.actionRound.submissions.length });
+});
+
+// Aperçu (dry-run) d'une réponse du MJ : ce qui serait appliqué, sans rien diffuser.
+app.post('/api/adventures/:id/narration/preview', (req: Request, res: Response) => {
+  const p = previewNarration(req.params.id, req.body?.text);
+  if (!p) return res.status(404).json({ error: 'Aventure introuvable.' });
+  res.json(p);
+});
+
+// Diffuse une réponse du MJ : applique @maj, ajoute au récit, broadcast temps réel.
+app.post('/api/adventures/:id/narration', (req: Request, res: Response) => {
+  const r = relayNarration(req.params.id, req.body?.text);
+  if (!r.ok) return res.status(400).json({ error: 'Aventure introuvable ou texte vide.' });
+  res.json({ ok: true, clean: r.clean, applied: r.applied });
+});
+
 app.post('/api/adventures/:id/gallery', async (req: Request, res: Response) => {
   const adv = store.get(req.params.id);
   if (!adv) return res.status(404).json({ error: 'Aventure introuvable.' });
@@ -147,9 +191,9 @@ async function removeUploads(srcs: string[]): Promise<void> {
 }
 
 // Applique les éléments de setup/màj issus du relais ou de l'IA, puis diffuse.
-function applyAndBroadcast(advId: string, raw: string): { clean: string } {
+function applyAndBroadcast(advId: string, raw: string): { clean: string; applied: string[] } {
   const adv = store.get(advId);
-  if (!adv) return { clean: raw };
+  if (!adv) return { clean: raw, applied: [] };
   const r: ApplyResult = applyGmUpdates(adv, raw);
 
   if (r.title && r.title !== adv.title) {
@@ -177,11 +221,58 @@ function applyAndBroadcast(advId: string, raw: string): { clean: string } {
     io.to(advId).emit('story:add', recap);
   }
   store.put(adv);
-  return { clean: r.clean };
+  return { clean: r.clean, applied: r.applied };
 }
 
 function activeCharacters(adv: Adventure) {
   return adv.characters.filter((c) => c.charClass);
+}
+// Bloc d'actions du tour courant (texte copiable / à transmettre au LLM).
+function actionBlock(adv: Adventure): string {
+  return adv.actionRound.submissions.map((s) => `${s.author} : ${s.text}`).join('\n');
+}
+// Tous les personnages actifs ont-ils soumis leur action ?
+function roundComplete(adv: Adventure): boolean {
+  const active = activeCharacters(adv);
+  return active.length > 0 && active.every((ac) => adv.actionRound.submissions.some((s) => s.characterId === ac.id));
+}
+// Diffuse une narration MJ (applique @maj, ajoute au récit). Partagé entre le socket
+// (story:narration) et l'API REST du pont (extension / MCP).
+function relayNarration(advId: string, text: string): { ok: boolean; clean: string; applied: string[] } {
+  const adv = store.get(advId);
+  if (!adv) return { ok: false, clean: '', applied: [] };
+  const content = String(text || '').trim();
+  if (!content) return { ok: false, clean: '', applied: [] };
+  const { clean, applied } = applyAndBroadcast(advId, content);
+  if (clean) {
+    const turn = { id: store.newId(), role: 'gm' as const, author: 'MJ', content: clean, timestamp: new Date().toISOString() };
+    const fresh = store.get(advId)!;
+    fresh.story.push(turn);
+    touch(fresh);
+    io.to(advId).emit('story:add', turn);
+  }
+  return { ok: true, clean, applied };
+}
+// Aperçu (dry-run) d'une narration : ce qui serait appliqué, sans rien muter ni diffuser.
+function previewNarration(advId: string, text: string) {
+  const adv = store.get(advId);
+  if (!adv) return null;
+  const r = applyGmUpdates(structuredClone(adv), String(text || ''));
+  return { clean: r.clean, applied: r.applied, title: r.title, startLocation: r.startLocation, classes: (r.classes || []).map((c) => c.name) };
+}
+// État compact d'une aventure, pensé pour un LLM (pont extension / MCP).
+function bridgeState(adv: Adventure) {
+  return {
+    id: adv.id, title: adv.title, theme: adv.theme, description: adv.description,
+    phase: adv.phase, startLocation: adv.startLocation, statTemplate: adv.statTemplate,
+    classPool: adv.classPool.map((c) => c.name),
+    characters: adv.characters.map((c) => ({
+      name: c.name || c.playerName, playerName: c.playerName, charClass: c.charClass,
+      hp: c.hp, stats: c.stats, inventory: c.inventory.map((i) => i.name),
+    })),
+    recentStory: adv.story.slice(-12).map((t) => ({ role: t.role, author: t.author, content: t.content })),
+    actionRound: { number: adv.actionRound.number, complete: roundComplete(adv), block: actionBlock(adv), submissions: adv.actionRound.submissions },
+  };
 }
 // Comparaison de propriété tolérante (casse/espaces) — cohérente avec gmsync.matchChar.
 const sameOwner = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -300,10 +391,8 @@ io.on('connection', (socket: Socket) => {
     io.to(advId!).emit('action:submitted', { characterId: c.id, author: c.name || c.playerName, text: action });
 
     // Tous les joueurs (ayant une classe) ont soumis → bloc copiable pour le MJ.
-    const active = activeCharacters(adv);
-    if (active.length && active.every((ac) => adv.actionRound.submissions.some((s) => s.characterId === ac.id))) {
-      const block = adv.actionRound.submissions.map((s) => `${s.author} : ${s.text}`).join('\n');
-      io.to(advId!).emit('action:roundComplete', { block });
+    if (roundComplete(adv)) {
+      io.to(advId!).emit('action:roundComplete', { block: actionBlock(adv) });
     }
   });
 
@@ -320,33 +409,14 @@ io.on('connection', (socket: Socket) => {
   // Permet au MJ de vérifier ce qui sera appliqué (fiches, titre, lieu, classes) avant
   // de diffuser → corrige les échecs silencieux du parser @maj.
   socket.on('story:preview', ({ text }: { text: string }, cb?: (p?: unknown) => void) => {
-    const adv = requireAdv((e) => cb && cb(e));
-    if (!adv) return;
-    const clone = structuredClone(adv);
-    const r = applyGmUpdates(clone, String(text || ''));
-    cb && cb({
-      clean: r.clean,
-      applied: r.applied,
-      title: r.title,
-      startLocation: r.startLocation,
-      classes: (r.classes || []).map((c) => c.name),
-    });
+    if (!requireAdv((e) => cb && cb(e))) return;
+    cb && cb(previewNarration(advId!, text));
   });
 
   // --- Relais manuel de la narration / setup du MJ ---
   socket.on('story:narration', ({ text }: { text: string }) => {
-    const adv = requireAdv();
-    if (!adv) return;
-    const content = String(text || '').trim();
-    if (!content) return;
-    const { clean } = applyAndBroadcast(advId!, content);
-    if (clean) {
-      const turn = { id: store.newId(), role: 'gm' as const, author: 'MJ', content: clean, timestamp: new Date().toISOString() };
-      const fresh = store.get(advId!)!;
-      fresh.story.push(turn);
-      touch(fresh);
-      io.to(advId!).emit('story:add', turn);
-    }
+    if (!requireAdv()) return;
+    relayNarration(advId!, text);
   });
 
   // --- Module IA (optionnel) : générer la réponse du MJ ---
@@ -360,12 +430,7 @@ io.on('connection', (socket: Socket) => {
     io.to(advId!).emit('ai:thinking', { on: true });
     try {
       const reply = await ai.generate(advId!, adv.ai?.model);
-      const { clean } = applyAndBroadcast(advId!, reply);
-      const turn = { id: store.newId(), role: 'gm' as const, author: 'MJ', content: clean, timestamp: new Date().toISOString() };
-      const fresh = store.get(advId!)!;
-      fresh.story.push(turn);
-      touch(fresh);
-      io.to(advId!).emit('story:add', turn);
+      relayNarration(advId!, reply);
     } catch (e) {
       io.to(advId!).emit('ai:error', { error: `IA non disponible (${(e as Error).message}) — continuez dans votre chat Claude habituel.` });
     } finally {

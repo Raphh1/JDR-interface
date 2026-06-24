@@ -87,14 +87,35 @@ function ollamaModelInstalled(id: string): boolean {
   return ollamaTags.some((t) => t === id || t.startsWith(id + ':'));
 }
 
+// Provider d'un modèle : connu (MODELS) ou découvert dynamiquement chez Ollama.
+function modelProvider(id?: string): Provider | null {
+  if (!id) return null;
+  if (MODELS[id]) return MODELS[id].provider;
+  if (ollamaTags.includes(id) || ollamaModelInstalled(id)) return 'ollama';
+  return null;
+}
+
+// Liste complète proposée au client : modèles connus (toujours, comme indices à installer)
+// + TOUT modèle réellement installé chez Ollama (ex. « llama3 », « mistral », etc.).
+export function modelsMap(): typeof MODELS {
+  const out: typeof MODELS = { ...MODELS };
+  for (const tag of ollamaTags) {
+    const coveredByKnown = Object.keys(MODELS).some(
+      (id) => MODELS[id].provider === 'ollama' && (tag === id || tag.startsWith(id + ':')),
+    );
+    if (!coveredByKnown && !out[tag]) out[tag] = { label: `${tag} — local (Ollama), 0 token`, provider: 'ollama' };
+  }
+  return out;
+}
+
 export function isModelAvailable(model?: string): boolean {
-  const m = model ? MODELS[model] : undefined;
-  if (!m) return false;
-  return m.provider === 'anthropic' ? anthropicAvailable() : (ollamaUp && ollamaModelInstalled(model!));
+  const p = modelProvider(model);
+  if (!p) return false;
+  return p === 'anthropic' ? anthropicAvailable() : (ollamaUp && ollamaModelInstalled(model!));
 }
 
 export function availableModels(): string[] {
-  return Object.keys(MODELS).filter((id) => isModelAvailable(id));
+  return Object.keys(modelsMap()).filter((id) => isModelAvailable(id));
 }
 
 export function isAvailable(): boolean {
@@ -105,10 +126,15 @@ export function isAvailable(): boolean {
 // sinon dolphin-llama3 (le sélecteur l'affiche, l'utilisateur saura quoi installer).
 export function defaultModel(): string {
   const avail = availableModels();
-  const local = avail.find((id) => MODELS[id].provider === 'ollama');
+  const local = avail.find((id) => modelProvider(id) === 'ollama');
   if (local) return local;
   if (avail.length) return avail[0];
   return 'dolphin-llama3';
+}
+
+// Re-sonde Ollama à la volée (les modèles peuvent être pull après le démarrage du serveur).
+export async function refresh(): Promise<void> {
+  await detectOllama();
 }
 
 export function status(): AiStatus {
@@ -116,7 +142,7 @@ export function status(): AiStatus {
     sdkInstalled: !!AnthropicCtor,
     keyDetected: !!process.env.ANTHROPIC_API_KEY,
     available: isAvailable(),
-    models: MODELS,
+    models: modelsMap(),
     availableModels: availableModels(),
     defaultModel: defaultModel(),
     loadError,
@@ -217,7 +243,7 @@ function buildMessages(adv: Adventure): any[] {
 
 // Appel bas niveau routé vers le bon backend selon le modèle.
 async function chat(model: string, system: string, messages: any[], maxTokens: number): Promise<string> {
-  const provider = MODELS[model]?.provider;
+  const provider = modelProvider(model);
   return provider === 'ollama'
     ? chatOllama(model, system, messages, maxTokens)
     : chatAnthropic(model, system, messages, maxTokens);
@@ -256,8 +282,8 @@ async function chatOllama(model: string, system: string, messages: any[], maxTok
 }
 
 function resolveModel(adv: Adventure, model?: string): string {
-  if (model && MODELS[model]) return model;
-  if (adv.ai?.model && MODELS[adv.ai.model]) return adv.ai.model;
+  if (model && modelProvider(model)) return model;
+  if (adv.ai?.model && modelProvider(adv.ai.model)) return adv.ai.model;
   return defaultModel();
 }
 
@@ -267,7 +293,7 @@ export async function generate(adventureId: string, model?: string): Promise<str
 
   const chosen = resolveModel(adv, model);
   if (!isModelAvailable(chosen)) {
-    if (MODELS[chosen]?.provider === 'ollama') {
+    if (modelProvider(chosen) === 'ollama' || MODELS[chosen]?.provider === 'ollama') {
       throw new Error(`Modèle local « ${chosen} » indisponible : vérifie qu'Ollama tourne (${OLLAMA_HOST}) et fais « ollama pull ${chosen} ».`);
     }
     throw new Error(anthropicAvailable() ? `Modèle « ${chosen} » indisponible.` : "Aucune clé API Anthropic configurée sur le serveur.");

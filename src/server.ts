@@ -98,7 +98,7 @@ app.delete('/api/adventures/:id', async (req: Request, res: Response) => {
   broadcastList();
 });
 
-app.get('/api/ai/status', (_req: Request, res: Response) => res.json(ai.status()));
+app.get('/api/ai/status', async (_req: Request, res: Response) => { await ai.refresh(); res.json(ai.status()); });
 
 // URLs LAN à partager (pour le bandeau d'accueil). On priorise les adresses 192.168.x.
 app.get('/api/network', (_req: Request, res: Response) => {
@@ -476,7 +476,7 @@ io.on('connection', (socket: Socket) => {
     const adv = requireAdv();
     if (!adv) return;
     if (!adv.ai) adv.ai = { model: ai.status().defaultModel, summary: '' };
-    if (ai.MODELS[model]) { adv.ai.model = model; store.put(adv); }
+    if (ai.isModelAvailable(model) || ai.MODELS[model]) { adv.ai.model = model; store.put(adv); }
     io.to(advId!).emit('ai:model', { model: adv.ai.model });
   });
 

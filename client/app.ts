@@ -291,7 +291,7 @@ function wireSocket(socket: any) {
     if (title) toast('📜 ' + title);
   });
   socket.on('sheets:synced', () => { renderPlayers(); });
-  socket.on('story:add', (turn: StoryTurn) => { if (!state.adv) return; if (state.adv.story.some((t) => t.id === turn.id)) return; state.adv.story.push(turn); appendStory(turn); });
+  socket.on('story:add', (turn: StoryTurn) => { if (!state.adv) return; if (state.adv.story.some((t) => t.id === turn.id)) return; state.adv.story.push(turn); if (state.adv.phase === 'lobby') renderLobby(); else appendStory(turn); });
   socket.on('action:submitted', (s: ActionSubmission) => {
     if (!state.adv) return;
     if (!state.adv.actionRound.submissions.some((x) => x.characterId === s.characterId)) state.adv.actionRound.submissions.push(s);
@@ -348,6 +348,8 @@ function renderLobby() {
   const me = myCharacter();
   const hasClasses = adv.classPool.length > 0;
   const allPicked = adv.characters.every((c) => c.charClass);
+  const hasRecit = adv.story.some((t) => t.role === 'gm');
+  const canStart = allPicked && hasRecit;
 
   root.append(elem('div', { class: 'lobby-head' }, [
     elem('h2', { class: 'lobby-title' }, [adv.title]),
@@ -373,10 +375,11 @@ function renderLobby() {
         elem('span', { class: 'roster-class' }, [c.charClass ? `⚔ ${c.charClass}` : '⏳ choisit sa classe…']),
       ]))),
       // Seul le MJ lance l'aventure (le serveur le vérifie aussi) ; les autres patientent.
+      // On ne lance pas sans récit d'ouverture : sinon les joueurs sont jetés dans le vide.
       state.isMj
-        ? elem('button', { class: 'btn btn-primary btn-big', disabled: !allPicked, onclick: () => state.socket.emit('game:start') }, [allPicked ? "🔥 Lancer l'aventure" : 'En attente des choix…'])
+        ? elem('button', { class: 'btn btn-primary btn-big', disabled: !canStart, onclick: () => state.socket.emit('game:start') }, [canStart ? "🔥 Lancer l'aventure" : !allPicked ? 'En attente des choix…' : 'En attente du récit d\'ouverture…'])
         : elem('p', { class: 'hint' }, [allPicked ? "En attente que l'assistant-MJ lance l'aventure…" : 'En attente des choix…']),
-      state.isMj && allPicked ? elem('p', { class: 'hint' }, ['Astuce MJ : après le lancement, dis à Claude qui a pioché quelle classe pour qu\'il démarre la scène d\'ouverture.']) : elem('span', {}, []),
+      state.isMj && allPicked && !hasRecit ? elem('p', { class: 'hint' }, ['Dis à Claude qui a pioché quelle classe, puis colle sa scène d\'ouverture ci-dessous. Elle s\'affichera ici avant le lancement.']) : elem('span', {}, []),
     ]));
     // Permet au MJ de re-coller (ex: pour corriger les classes). Réservé au MJ.
     if (state.isMj) {

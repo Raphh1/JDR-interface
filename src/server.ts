@@ -229,7 +229,16 @@ function activeCharacters(adv: Adventure) {
 }
 // Bloc d'actions du tour courant (texte copiable / à transmettre au LLM).
 function actionBlock(adv: Adventure): string {
-  return adv.actionRound.submissions.map((s) => `${s.author} : ${s.text}`).join('\n');
+  const actions = adv.actionRound.submissions.map((s) => `${s.author} : ${s.text}`).join('\n');
+  // Au premier tour, Claude n'a pas encore vu qui a pioché quelle classe : on le rappelle
+  // en tête du bloc pour qu'il sache à qui il a affaire avant de narrer la suite.
+  if (adv.actionRound.number <= 1) {
+    const roster = activeCharacters(adv)
+      .map((c) => `- ${c.name || c.playerName} : ${c.charClass}`)
+      .join('\n');
+    if (roster) return `La compagnie (classes choisies) :\n${roster}\n\nActions des joueurs :\n${actions}`;
+  }
+  return actions;
 }
 // Tous les personnages actifs ont-ils soumis leur action ?
 function roundComplete(adv: Adventure): boolean {
@@ -386,6 +395,11 @@ io.on('connection', (socket: Socket) => {
     // Impossible de lancer une partie sans MJ ; seul le MJ peut lancer.
     if (!adv.mjName) return socket.emit('notice', { error: "Aucun MJ : quelqu'un doit relayer le MJ avant de lancer." });
     if (!amMj(adv)) return socket.emit('notice', { error: "Seul l'assistant-MJ peut lancer l'aventure." });
+    // On ne lance pas dans le vide : un récit d'ouverture (role 'gm') doit exister
+    // pour que les joueurs aient une scène à laquelle réagir avant d'agir.
+    if (!adv.story.some((t) => t.role === 'gm')) {
+      return socket.emit('notice', { error: "Poste d'abord le récit d'ouverture (réponse de Claude) avant de lancer l'aventure." });
+    }
     adv.phase = 'play';
     touch(adv);
     io.to(advId!).emit('phase:changed', { phase: adv.phase });

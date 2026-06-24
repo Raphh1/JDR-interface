@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Compagnon de JDR</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=EB+Garamond:ital@0;1&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%B2%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <header id="topbar" class="topbar hidden">
+    <button id="btn-home" class="link" title="Accueil">🎲 <span>Compagnon JDR</span></button>
+    <div class="topbar-title" id="adv-title"></div>
+    <div class="topbar-right">
+      <span id="presence" class="presence"></span>
+      <span id="me-name" class="me-name"></span>
+      <button id="btn-settings-top" class="link small" title="Paramètres">⚙</button>
+    </div>
+  </header>
+
+  <!-- ============ ÉCRAN D'ACCUEIL ============ -->
+  <main id="view-home" class="view">
+    <div class="home-hero">
+      <h1>Compagnon de JDR</h1>
+      <p class="subtitle">Vos aventures, quel que soit l'univers. Le récit se joue ici, le MJ reste dans votre chat Claude.</p>
+    </div>
+    <div class="home-actions">
+      <button id="btn-new-adventure" class="btn btn-primary btn-big">✦ Nouvelle aventure</button>
+      <label class="toggle-archived"><input type="checkbox" id="show-archived" /> Afficher les archives</label>
+    </div>
+    <div id="adventure-list" class="adventure-list"></div>
+  </main>
+
+  <!-- ============ ASSISTANT DE CRÉATION ============ -->
+  <main id="view-create" class="view hidden">
+    <div class="panel narrow parchment">
+      <h2>Forger un nouveau monde</h2>
+      <label class="field">
+        <span>Nom de la campagne <em>(facultatif — l'IA peut le trouver)</em></span>
+        <input type="text" id="create-title" placeholder="Laisse vide pour que le MJ l'invente…" />
+      </label>
+      <label class="field">
+        <span>Thème / univers</span>
+        <input type="text" id="create-theme" placeholder="fantasy médiéval, cyberpunk, horreur cosmique…" />
+      </label>
+      <label class="field">
+        <span>Description du monde <em>(facultatif)</em></span>
+        <textarea id="create-desc" rows="3" placeholder="Quelques lignes d'ambiance, le ton, les enjeux…"></textarea>
+      </label>
+
+      <div class="field">
+        <span>Joueurs <em>(2 à 6)</em></span>
+        <div id="players-list" class="players-list"></div>
+        <button type="button" id="add-player" class="btn btn-small">+ Ajouter un joueur</button>
+      </div>
+
+      <details class="advanced">
+        <summary>Caractéristiques de l'univers (avancé)</summary>
+        <p class="hint">Les valeurs viendront des classes générées par le MJ. Tu peux quand même renommer les axes de caractéristiques ici.</p>
+        <div id="stats-list" class="stats-list"></div>
+        <div class="stats-actions">
+          <button type="button" id="add-stat" class="btn btn-small">+ Ajouter une stat</button>
+          <button type="button" id="reset-stats" class="btn btn-small btn-ghost">Réinitialiser (générique)</button>
+        </div>
+      </details>
+
+      <div id="create-error" class="form-error"></div>
+      <div class="wizard-actions">
+        <button id="cancel-create" class="btn btn-ghost">Annuler</button>
+        <button id="submit-create" class="btn btn-primary">Créer l'aventure</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ TABLE DE JEU ============ -->
+  <main id="view-table" class="view hidden">
+    <!-- Salon (phase lobby) — construit dynamiquement -->
+    <div id="lobby" class="hidden"></div>
+
+    <!-- Jeu (phase play) -->
+    <div id="play" class="hidden">
+      <nav class="tabs" id="tabs">
+        <button class="tab active" data-tab="recit">📖 Récit</button>
+        <button class="tab" data-tab="players">🛡 Joueurs</button>
+        <button class="tab" data-tab="dice">🎲 Dés</button>
+        <button class="tab" data-tab="scenes">🖼 Scènes</button>
+      </nav>
+
+      <section class="tab-panel active" id="tab-recit">
+        <div id="story-stage" class="story-stage">
+          <div id="stage-location" class="stage-location"></div>
+          <div id="story-feed" class="story-feed"></div>
+          <div id="action-board" class="action-board"></div>
+        </div>
+
+        <div class="recit-controls">
+          <button id="open-action" class="btn btn-primary btn-big">⚔ Décider de mon action</button>
+          <span id="action-hint" class="action-hint"></span>
+        </div>
+
+        <details id="relay-panel" class="relay-panel">
+          <summary>🎙 Assistant-MJ — coller la réponse de Claude</summary>
+          <div class="panel">
+            <div class="relay-top">
+              <button id="copy-briefing" class="btn">📋 Copier le briefing pour Claude</button>
+            </div>
+            <textarea id="narration-input" rows="4" placeholder="Colle ici la réponse du MJ… (Ctrl+Entrée pour diffuser)"></textarea>
+            <div class="relay-actions">
+              <button id="narration-send" class="btn btn-primary">Diffuser à la table</button>
+              <button id="ai-generate" class="btn btn-ghost hidden">🤖 Laisser le MJ IA répondre</button>
+            </div>
+            <div id="round-block" class="round-block hidden"></div>
+          </div>
+        </details>
+      </section>
+
+      <section class="tab-panel" id="tab-players">
+        <div id="players-grid" class="sheets-grid"></div>
+      </section>
+
+      <section class="tab-panel" id="tab-dice">
+        <div class="dice-layout">
+          <div class="dice-roller panel">
+            <h3>Lanceur de dés</h3>
+            <div class="dice-buttons" id="dice-buttons"></div>
+            <label class="field inline"><span>Modificateur</span><input type="number" id="dice-mod" value="0" /></label>
+            <div id="dice-stage" class="dice-stage"><div class="dice-placeholder">Choisis un dé pour lancer</div></div>
+          </div>
+          <div class="dice-history panel">
+            <h3>Historique</h3>
+            <ul id="dice-history" class="dice-history-list"></ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="tab-scenes">
+        <div class="gallery-actions panel">
+          <h3>Galerie de scènes</h3>
+          <p class="hint">Colle une image (Ctrl+V) ou choisis un fichier, ajoute une légende.</p>
+          <div class="gallery-add-row">
+            <input type="text" id="gallery-caption" placeholder="Légende (facultatif)" />
+            <input type="file" id="gallery-file" accept="image/*" />
+          </div>
+          <div id="gallery-paste-zone" class="paste-zone" tabindex="0">Zone de collage — clique ici puis Ctrl+V</div>
+        </div>
+        <div id="gallery-grid" class="gallery-grid"></div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ============ PARAMÈTRES ============ -->
+  <main id="view-settings" class="view hidden">
+    <div class="panel narrow parchment">
+      <h2>Paramètres — Module MJ (IA)</h2>
+      <p class="hint">Entièrement optionnel. L'app fonctionne sans IA : le MJ reste géré dans votre chat Claude.</p>
+      <div id="ai-status-box" class="status-box"></div>
+      <div class="field"><span>Modèle</span><select id="ai-model-select"></select></div>
+      <div class="info-block">
+        <p>⚠ Pense à <strong>désactiver l'auto-reload</strong> et à <strong>fixer une limite de dépense</strong> sur ton compte Anthropic.</p>
+        <a href="https://console.anthropic.com" target="_blank" rel="noopener">→ console.anthropic.com</a>
+      </div>
+      <button id="settings-back" class="btn btn-ghost">← Retour</button>
+    </div>
+  </main>
+
+  <!-- Modale "ton nom" -->
+  <div id="name-modal" class="modal hidden">
+    <div class="modal-box parchment">
+      <h2>Bienvenue à la table</h2>
+      <p>Qui es-tu&nbsp;?</p>
+      <select id="name-claim" class="hidden"></select>
+      <input type="text" id="name-input" placeholder="Ton nom" />
+      <button id="name-confirm" class="btn btn-primary">Rejoindre</button>
+    </div>
+  </div>
+
+  <!-- Modale "décider de mon action" -->
+  <div id="action-modal" class="modal hidden">
+    <div class="modal-box parchment">
+      <h2>Que fais-tu&nbsp;?</h2>
+      <p class="hint">Décris ce que tu dis, fais, ou ne fais pas. Une fois validée, ton action est verrouillée et révélée à la table.</p>
+      <textarea id="action-text" rows="4" placeholder="Je m'avance vers le vieil homme et…"></textarea>
+      <div class="modal-actions">
+        <button id="action-cancel" class="btn btn-ghost">Annuler</button>
+        <button id="action-confirm" class="btn btn-primary">Verrouiller mon action</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

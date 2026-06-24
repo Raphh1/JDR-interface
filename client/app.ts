@@ -57,6 +57,7 @@ const state = {
   joinedId: null as string | null,  // aventure à laquelle on doit rester (re)connecté
   socket: null as any,
   revealed: new Set<string>(),  // ids de tours déjà affichés (pour n'animer que les nouveaux)
+  aiReady: false,  // au moins un modèle IA disponible (Ollama local ou clé Anthropic)
 };
 function myCharacter(): Character | null {
   return state.adv?.characters.find((c) => c.playerName === state.name) || null;
@@ -359,12 +360,25 @@ function renderLobby() {
   if (!hasClasses) {
     const setup: (Node | string)[] = [
       elem('h3', {}, ['En attente des classes du MJ']),
-      elem('p', { class: 'hint' }, ["L'assistant-MJ copie le briefing, l'envoie à Claude, et colle la réponse (titre + lieu + classes) ci-dessous."]),
     ];
-    if (state.isMj) setup.push(
-      elem('button', { class: 'btn', onclick: () => copyToClipboard(buildBriefing(), 'Briefing copié — colle-le dans ton chat Claude.') }, ['📋 Copier le briefing pour Claude']),
-      buildRelayBox(),
-    );
+    if (state.isMj && state.aiReady) {
+      // Voie 100 % locale : l'IA (Llama3) génère titre + lieu + pool de classes, 0 copier-coller.
+      setup.push(
+        elem('p', { class: 'hint' }, ['Génère tout l\'univers avec l\'IA locale, ou relaie un chat externe.']),
+        elem('button', { class: 'btn btn-primary btn-big', onclick: () => { state.socket.emit('ai:generate'); toast('L\'IA prépare l\'univers…'); } }, ['🎲 Générer l\'univers avec l\'IA']),
+        elem('details', { class: 'relay-panel' }, [
+          elem('summary', {}, ['…ou via un chat externe']),
+          elem('button', { class: 'btn', onclick: () => copyToClipboard(buildBriefing(), 'Briefing copié — colle-le dans ton chat Claude.') }, ['📋 Copier le briefing']),
+          buildRelayBox(),
+        ]),
+      );
+    } else {
+      setup.push(elem('p', { class: 'hint' }, ["L'assistant-MJ copie le briefing, l'envoie à Claude, et colle la réponse (titre + lieu + classes) ci-dessous."]));
+      if (state.isMj) setup.push(
+        elem('button', { class: 'btn', onclick: () => copyToClipboard(buildBriefing(), 'Briefing copié — colle-le dans ton chat Claude.') }, ['📋 Copier le briefing pour Claude']),
+        buildRelayBox(),
+      );
+    }
     root.append(elem('div', { class: 'panel parchment lobby-setup' }, setup));
   } else {
     root.append(elem('div', { class: 'class-pool' }, adv.classPool.map((cls) => buildClassCard(cls, me))));
@@ -376,10 +390,16 @@ function renderLobby() {
       ]))),
       // Seul le MJ lance l'aventure (le serveur le vérifie aussi) ; les autres patientent.
       // On ne lance pas sans récit d'ouverture : sinon les joueurs sont jetés dans le vide.
+      // Générer la scène d'ouverture avec l'IA locale (Llama3) une fois les classes choisies.
+      state.isMj && allPicked && !hasRecit && state.aiReady
+        ? elem('button', { class: 'btn btn-primary btn-big', onclick: () => { state.socket.emit('ai:generate'); toast('L\'IA écrit la scène d\'ouverture…'); } }, ['🎲 Générer la scène d\'ouverture'])
+        : elem('span', {}, []),
+      // Seul le MJ lance l'aventure (le serveur le vérifie aussi) ; les autres patientent.
+      // On ne lance pas sans récit d'ouverture : sinon les joueurs sont jetés dans le vide.
       state.isMj
-        ? elem('button', { class: 'btn btn-primary btn-big', disabled: !canStart, onclick: () => state.socket.emit('game:start') }, [canStart ? "🔥 Lancer l'aventure" : !allPicked ? 'En attente des choix…' : 'En attente du récit d\'ouverture…'])
+        ? elem('button', { class: 'btn ' + (state.aiReady ? 'btn-ghost' : 'btn-primary') + ' btn-big', disabled: !canStart, onclick: () => state.socket.emit('game:start') }, [canStart ? "🔥 Lancer l'aventure" : !allPicked ? 'En attente des choix…' : 'En attente du récit d\'ouverture…'])
         : elem('p', { class: 'hint' }, [allPicked ? "En attente que l'assistant-MJ lance l'aventure…" : 'En attente des choix…']),
-      state.isMj && allPicked && !hasRecit ? elem('p', { class: 'hint' }, ['Dis à Claude qui a pioché quelle classe, puis colle sa scène d\'ouverture ci-dessous. Elle s\'affichera ici avant le lancement.']) : elem('span', {}, []),
+      state.isMj && allPicked && !hasRecit && !state.aiReady ? elem('p', { class: 'hint' }, ['Dis à Claude qui a pioché quelle classe, puis colle sa scène d\'ouverture ci-dessous. Elle s\'affichera ici avant le lancement.']) : elem('span', {}, []),
     ]));
     // Permet au MJ de re-coller (ex: pour corriger les classes). Réservé au MJ.
     if (state.isMj) {
@@ -728,7 +748,10 @@ function buildBriefing(): string {
 async function loadAiStatusBanner() {
   try {
     const s = await fetch('/api/ai/status').then((r) => r.json());
+    state.aiReady = !!s.available;
     $('#ai-generate').classList.toggle('hidden', !s.available);
+    // Le lobby affiche des boutons « Générer » conditionnés à la dispo IA : on le rafraîchit.
+    if (state.adv?.phase === 'lobby') renderLobby();
   } catch { /* ignore */ }
 }
 function initRelay() {

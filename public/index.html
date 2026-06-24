@@ -63,6 +63,41 @@
         <button type="button" id="add-player" class="btn btn-small">+ Ajouter un joueur</button>
       </div>
 
+      <div class="field">
+        <span>Ton de la campagne <em>(facultatif)</em></span>
+        <div id="tone-chips" class="chip-group"></div>
+      </div>
+
+      <div class="field">
+        <span>Niveau de danger</span>
+        <div id="danger-chips" class="chip-group"></div>
+      </div>
+
+      <div class="field">
+        <span>Nombre de classes à générer</span>
+        <div class="stepper-row">
+          <button type="button" id="class-count-dec" class="btn btn-small btn-ghost">−</button>
+          <span id="class-count-val">5</span>
+          <button type="button" id="class-count-inc" class="btn btn-small btn-ghost">+</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <span>Profondeur de conception</span>
+        <p class="hint" id="depth-hint">3 questions → 1 tour d'affinage</p>
+        <div class="stepper-row">
+          <button type="button" id="depth-dec" class="btn btn-small btn-ghost">−</button>
+          <span id="depth-val">3</span>
+          <button type="button" id="depth-inc" class="btn btn-small btn-ghost">+</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <span>Source d'inspiration <em>(facultatif)</em></span>
+        <p class="hint">Le LLM s'inspirera du ton et des thèmes uniquement — aucun nom, lieu ou personnage ne sera copié.</p>
+        <input type="text" id="create-inspiration" placeholder="ex : Bloodborne, Dark Sun, un roman…" />
+      </div>
+
       <details class="advanced">
         <summary>Caractéristiques de l'univers (avancé)</summary>
         <p class="hint">Les valeurs viendront des classes générées par le MJ. Tu peux quand même renommer les axes de caractéristiques ici.</p>
@@ -111,7 +146,7 @@
           <summary>🎙 Assistant-MJ — coller la réponse de Claude</summary>
           <div class="panel">
             <div class="relay-top">
-              <button id="copy-briefing" class="btn">📋 Copier le briefing pour Claude</button>
+              <button id="copy-briefing" class="btn">📋 Copier l'état de la table</button>
             </div>
             <textarea id="narration-input" rows="4" placeholder="Colle ici la réponse du MJ… (Ctrl+Entrée pour vérifier)"></textarea>
             <div class="relay-actions">

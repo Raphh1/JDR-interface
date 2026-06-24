@@ -25,6 +25,9 @@ export interface ClassDef {
   description: string;
   stats: Record<string, number>;  // valeurs de départ pour les caractéristiques
   hp: number;                     // PV de départ
+  equipment: string[];            // objets de départ, matérialisés à la pioche
+  ability: string;                // atout signature : "Nom — effet"
+  hook: string;                   // accroche narrative reliant la classe au récit
 }
 
 export interface Roll {
@@ -79,10 +82,10 @@ export interface Adventure {
   theme: string;
   description: string;
   statTemplate: string[];
-  startLocation: string;     // lieu de départ, affiché en fond du récit
-  mjName: string;            // nom du MJ (l'hôte/créateur) ; '' tant qu'aucun MJ assigné
-  phase: Phase;              // 'lobby' (pioche des classes) puis 'play'
-  classPool: ClassDef[];     // classes générées par Claude, piochables
+  startLocation: string;       // lieu de départ, affiché en fond du récit
+  mjName: string;              // nom du MJ (l'hôte/créateur) ; '' tant qu'aucun MJ assigné
+  phase: Phase;                // 'lobby' (pioche des classes) puis 'play'
+  classPool: ClassDef[];       // classes générées par Claude, piochables
   createdAt: string;
   lastSessionAt: string;
   archived: boolean;
@@ -92,6 +95,13 @@ export interface Adventure {
   story: StoryTurn[];
   actionRound: ActionRound;
   ai: AiSettings;
+  // Critères de conception (optionnels pour compatibilité avec les anciennes aventures)
+  tone?: string;               // Sombre | Héroïque | Comique | Horreur | Mystère | (libre)
+  dangerLevel?: string;        // Bienveillant | Modéré | Mortel
+  inspiration?: string;        // source d'inspiration (garde anti-copie dans le prompt)
+  conceptionDepth?: number;    // 1–10 : nombre de questions d'affinage
+  classCount?: number;         // 3–8 : taille du pool de classes à générer
+  lore?: string;               // pitch/PNJ/intrigue collé par le MJ ; gardé côté MJ, non diffusé
 }
 
 export interface AdventureSummary {

@@ -4,7 +4,7 @@ declare const io: any;
 // ---- Types (miroir du serveur) ----
 interface InventoryItem { id: string; name: string; qty: number; notes: string; }
 interface Character { id: string; playerName: string; name: string; charClass: string; stats: Record<string, number>; hp: { current: number; max: number }; inventory: InventoryItem[]; notes: string; }
-interface ClassDef { id: string; name: string; description: string; stats: Record<string, number>; hp: number; }
+interface ClassDef { id: string; name: string; description: string; stats: Record<string, number>; hp: number; equipment: string[]; ability: string; hook: string; }
 interface Roll { id: string; player: string; die: string; modifier: number; raw: number; total: number; crit: 'success' | 'fail' | null; timestamp: string; }
 interface GalleryItem { id: string; src: string; caption: string; timestamp: string; }
 interface StoryTurn { id: string; role: 'player' | 'gm' | 'system'; author: string; content: string; timestamp: string; }
@@ -14,6 +14,7 @@ interface Adventure {
   startLocation: string; mjName: string; phase: 'lobby' | 'play'; classPool: ClassDef[];
   archived: boolean; characters: Character[]; rolls: Roll[]; gallery: GalleryItem[];
   story: StoryTurn[]; actionRound: { number: number; submissions: ActionSubmission[] }; ai: { model: string; summary: string };
+  tone: string; dangerLevel: string; inspiration: string; conceptionDepth: number; classCount: number; lore: string;
 }
 interface AdventureSummary { id: string; title: string; theme: string; description: string; playerCount: number; phase: 'lobby' | 'play'; createdAt: string; lastSessionAt: string; archived: boolean; }
 
@@ -135,11 +136,44 @@ async function deleteAdventure(id: string, title: string) {
 // Création
 // ===========================================================================
 const DEFAULT_STATS = ['Force', 'Dextérité', 'Constitution', 'Intelligence', 'Sagesse', 'Charisme'];
+const TONE_OPTIONS = ['Sombre', 'Héroïque', 'Comique', 'Horreur', 'Mystère'];
+const DANGER_OPTIONS = ['Bienveillant', 'Modéré', 'Mortel'];
+
+// État local du formulaire de création (critères de conception).
+const createState = { tone: '', dangerLevel: '', classCount: 5, depth: 3 };
+
+function renderChips(containerId: string, options: string[], stateKey: 'tone' | 'dangerLevel') {
+  const container = $(containerId); container.innerHTML = '';
+  options.forEach((opt) => {
+    const btn = elem('button', {
+      type: 'button',
+      class: 'chip' + (createState[stateKey] === opt ? ' chip-active' : ''),
+      onclick: () => {
+        createState[stateKey] = createState[stateKey] === opt ? '' : opt;
+        renderChips(containerId, options, stateKey);
+      },
+    }, [opt]);
+    container.append(btn);
+  });
+}
+
+function updateDepthHint() {
+  const { rounds, repartition } = affinagePlan(createState.depth);
+  $('#depth-val').textContent = String(createState.depth);
+  $('#depth-hint').textContent = `${createState.depth} question${createState.depth > 1 ? 's' : ''} → ${rounds} tour${rounds > 1 ? 's' : ''} d'affinage (${repartition})`;
+}
+
 function openCreateWizard() {
   ($('#create-title') as HTMLInputElement).value = '';
   ($('#create-theme') as HTMLInputElement).value = '';
   ($('#create-desc') as HTMLTextAreaElement).value = '';
+  ($('#create-inspiration') as HTMLInputElement).value = '';
   $('#create-error').textContent = '';
+  createState.tone = ''; createState.dangerLevel = ''; createState.classCount = 5; createState.depth = 3;
+  renderChips('#tone-chips', TONE_OPTIONS, 'tone');
+  renderChips('#danger-chips', DANGER_OPTIONS, 'dangerLevel');
+  $('#class-count-val').textContent = '5';
+  updateDepthHint();
   renderRows('#players-list', ['', ''], 'Nom du joueur');
   renderRows('#stats-list', [...DEFAULT_STATS], 'Nom de la stat');
 }
@@ -157,17 +191,32 @@ function initCreateButtons() {
   $('#reset-stats').addEventListener('click', () => renderRows('#stats-list', [...DEFAULT_STATS], 'Nom de la stat'));
   $('#cancel-create').addEventListener('click', () => { location.hash = '#/'; });
   $('#submit-create').addEventListener('click', submitCreate);
+
+  $('#class-count-dec').addEventListener('click', () => {
+    if (createState.classCount > 3) { createState.classCount--; $('#class-count-val').textContent = String(createState.classCount); }
+  });
+  $('#class-count-inc').addEventListener('click', () => {
+    if (createState.classCount < 8) { createState.classCount++; $('#class-count-val').textContent = String(createState.classCount); }
+  });
+  $('#depth-dec').addEventListener('click', () => {
+    if (createState.depth > 1) { createState.depth--; updateDepthHint(); }
+  });
+  $('#depth-inc').addEventListener('click', () => {
+    if (createState.depth < 10) { createState.depth++; updateDepthHint(); }
+  });
 }
 async function submitCreate() {
   const title = ($('#create-title') as HTMLInputElement).value.trim();
   const theme = ($('#create-theme') as HTMLInputElement).value.trim();
   const description = ($('#create-desc') as HTMLTextAreaElement).value.trim();
+  const inspiration = ($('#create-inspiration') as HTMLInputElement).value.trim();
   const players = $$('#players-list input').map((i) => (i as HTMLInputElement).value.trim()).filter(Boolean);
   const statTemplate = $$('#stats-list input').map((i) => (i as HTMLInputElement).value.trim()).filter(Boolean);
   const err = $('#create-error');
   if (players.length < 2) { err.textContent = 'Il faut au moins 2 joueurs.'; return; }
   if (players.length > 6) { err.textContent = 'Maximum 6 joueurs.'; return; }
-  const res = await fetch('/api/adventures', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, theme, description, players, statTemplate }) });
+  const body = { title, theme, description, players, statTemplate, tone: createState.tone, dangerLevel: createState.dangerLevel, inspiration, conceptionDepth: createState.depth, classCount: createState.classCount };
+  const res = await fetch('/api/adventures', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.ok) { err.textContent = (await res.json()).error || 'Erreur.'; return; }
   const adv: AdventureSummary = await res.json();
   // Le créateur est l'assistant-MJ d'office (revendication enregistrée au prochain join).
@@ -309,6 +358,8 @@ function wireSocket(socket: any) {
   socket.on('ai:thinking', ({ on }: { on: boolean }) => setThinking(on));
   socket.on('ai:error', ({ error }: { error: string }) => toast(error));
   socket.on('ai:model', ({ model }: { model: string }) => { if (state.adv) state.adv.ai = { ...(state.adv.ai || { summary: '' }), model }; });
+  // Lore de campagne enregistré (conception) : gardé côté MJ pour le brief d'état.
+  socket.on('adventure:lore', ({ lore }: { lore: string }) => { if (state.adv) state.adv.lore = lore; });
   // MJ assigné (autoritatif) : on (re)dérive notre rôle et on rafraîchit l'UI de relais.
   socket.on('adventure:mj', ({ mjName }: { mjName: string }) => {
     if (!state.adv) return;
@@ -373,7 +424,7 @@ function renderLobby() {
         ]),
       );
     } else {
-      setup.push(elem('p', { class: 'hint' }, ["L'assistant-MJ copie le briefing, l'envoie à Claude, et colle la réponse (titre + lieu + classes) ci-dessous."]));
+      setup.push(elem('p', { class: 'hint' }, ["L'assistant-MJ copie le briefing, l'envoie à Claude, et colle SA RÉPONSE COMPLÈTE ci-dessous (le lore est gardé pour toi, seuls titre + lieu + classes sont publiés)."]));
       if (state.isMj) setup.push(
         elem('button', { class: 'btn', onclick: () => copyToClipboard(buildBriefing(), 'Briefing copié — colle-le dans ton chat Claude.') }, ['📋 Copier le briefing pour Claude']),
         buildRelayBox(),
@@ -401,9 +452,10 @@ function renderLobby() {
         : elem('p', { class: 'hint' }, [allPicked ? "En attente que l'assistant-MJ lance l'aventure…" : 'En attente des choix…']),
       state.isMj && allPicked && !hasRecit && !state.aiReady ? elem('p', { class: 'hint' }, ['Dis à Claude qui a pioché quelle classe, puis colle sa scène d\'ouverture ci-dessous. Elle s\'affichera ici avant le lancement.']) : elem('span', {}, []),
     ]));
-    // Permet au MJ de re-coller (ex: pour corriger les classes). Réservé au MJ.
+    // Le MJ copie l'état (qui a pioché quoi) → Claude écrit la scène d'ouverture → re-coller.
     if (state.isMj) {
-      const relay = elem('details', { class: 'relay-panel' }, [elem('summary', {}, ['🎙 Re-coller une réponse du MJ']), buildRelayBox()]);
+      root.append(elem('button', { class: 'btn', onclick: () => copyToClipboard(buildStateBriefing(), 'État de la table copié — colle-le dans Claude pour la scène d\'ouverture.') }, ['📋 Copier l\'état de la table']));
+      const relay = elem('details', { class: 'relay-panel' }, [elem('summary', {}, ['🎙 Coller la réponse du MJ']), buildRelayBox()]);
       root.append(relay);
     }
   }
@@ -411,14 +463,20 @@ function renderLobby() {
 function buildClassCard(cls: ClassDef, me: Character | null): HTMLElement {
   const mine = me?.charClass === cls.name;
   const stats = Object.entries(cls.stats).map(([k, v]) => `${k} ${v}`).join(' · ');
-  return elem('div', { class: 'class-card' + (mine ? ' picked' : '') }, [
+  const children: HTMLElement[] = [
     elem('h4', {}, [cls.name]),
     cls.description ? elem('p', { class: 'class-desc' }, [cls.description]) : elem('span', {}, []),
     elem('div', { class: 'class-stats' }, [`❤ ${cls.hp} PV${stats ? ' · ' + stats : ''}`]),
+  ];
+  if (cls.ability) children.push(elem('div', { class: 'class-ability' }, [`✨ ${cls.ability}`]));
+  if (cls.equipment?.length) children.push(elem('div', { class: 'class-equip' }, [`🎒 ${cls.equipment.join(', ')}`]));
+  if (cls.hook) children.push(elem('div', { class: 'class-hook' }, [`🔗 ${cls.hook}`]));
+  children.push(
     me
       ? elem('button', { class: 'btn ' + (mine ? 'btn-ghost' : 'btn-primary'), onclick: () => state.socket.emit('class:pick', { characterId: me.id, classId: cls.id }) }, [mine ? '✓ Choisie' : 'Choisir cette classe'])
       : elem('span', { class: 'hint' }, ['(seuls les joueurs piochent)']),
-  ]);
+  );
+  return elem('div', { class: 'class-card' + (mine ? ' picked' : '') }, children);
 }
 
 // ---- Relais (réutilisé salon + jeu) ----
@@ -450,7 +508,10 @@ function showNarrationPreview(text: string, p: NarrationPreview, onSent?: () => 
   } else {
     body.append(elem('p', { class: 'preview-none' }, ['Aucune mise à jour de fiche détectée (narration simple). Si tu attendais un bloc @maj, vérifie son format avant de diffuser.']));
   }
-  body.append(elem('p', { class: 'preview-section-title' }, ['Narration diffusée :']));
+  // Si le message contient un pool de classes, le texte libre est le LORE de campagne :
+  // gardé pour le MJ, jamais diffusé aux joueurs. Sinon c'est la narration diffusée.
+  const isLore = !!p.classes?.length && !!p.clean;
+  body.append(elem('p', { class: 'preview-section-title' }, [isLore ? '📜 Lore de campagne (gardé pour le MJ, non diffusé) :' : 'Narration diffusée :']));
   body.append(elem('div', { class: 'preview-narration' }, [p.clean || '(vide)']));
 
   const modal = $('#preview-modal'); modal.classList.remove('hidden');
@@ -650,6 +711,18 @@ function buildSheet(c: Character): HTMLElement {
   notes.value = c.notes;
   notes.addEventListener('change', () => emitCharUpdate(c.id, { notes: notes.value }));
   sheet.append(elem('div', {}, [elem('div', { class: 'sheet-section-title' }, ['Notes']), notes]));
+
+  // Atout + accroche : lookup dans le pool, rien à stocker sur la fiche.
+  if (c.charClass && state.adv) {
+    const cls = state.adv.classPool.find((cl) => cl.name === c.charClass);
+    if (cls?.ability || cls?.hook) {
+      const blocks: HTMLElement[] = [elem('div', { class: 'sheet-section-title' }, ['Classe'])];
+      if (cls.ability) blocks.push(elem('div', { class: 'sheet-ability' }, [`✨ ${cls.ability}`]));
+      if (cls.hook) blocks.push(elem('div', { class: 'sheet-hook' }, [`🔗 ${cls.hook}`]));
+      sheet.append(elem('div', {}, blocks));
+    }
+  }
+
   return sheet;
 }
 function emitCharUpdate(characterId: string, patch: any) { state.socket.emit('character:update', { characterId, patch }); }
@@ -713,36 +786,152 @@ function initGallery() {
 // ===========================================================================
 // Briefing & IA
 // ===========================================================================
+// Calcule le plan d'affinage : nombre de tours et répartition des questions par tour.
+function affinagePlan(n: number): { rounds: number; repartition: string } {
+  const rounds = n <= 4 ? 1 : n <= 7 ? 2 : 3;
+  if (rounds === 1) return { rounds, repartition: `${n} question${n > 1 ? 's' : ''}` };
+  if (rounds === 2) {
+    const t1 = Math.ceil(n / 2); const t2 = n - t1;
+    return { rounds, repartition: `tour 1 : ${t1} question${t1 > 1 ? 's' : ''} — tour 2 : ${t2} question${t2 > 1 ? 's' : ''}` };
+  }
+  const t1 = Math.ceil(n / 3); const t2 = Math.ceil((n - t1) / 2); const t3 = n - t1 - t2;
+  return { rounds, repartition: `tour 1 : ${t1} — tour 2 : ${t2} — tour 3 : ${t3}` };
+}
+
+// Brief d'ÉTAT (phase de jeu / lobby après pioche) : qui joue quoi, où on en est.
+// Distinct du brief de CONCEPTION (buildBriefing) qui lance la création du monde.
+function buildStateBriefing(): string {
+  const a = state.adv!;
+  const hasRecit = a.story.some((t) => t.role === 'gm');
+  const L: string[] = [];
+  L.push("Tu es le maître du jeu (MJ) de notre partie. Voici l'état ACTUEL de la table.");
+  L.push('Tiens-en compte et NE REPARS PAS du pitch initial.');
+  L.push('');
+  if (a.lore) {
+    L.push('LORE DE LA CAMPAGNE (rappel — ce que tu as conçu) :');
+    L.push(a.lore);
+    L.push('');
+  }
+  L.push(`Campagne : ${a.title}`);
+  if (a.theme) L.push(`Univers : ${a.theme}`);
+  if (a.startLocation) L.push(`Lieu actuel : ${a.startLocation}`);
+  L.push('');
+  L.push('LA COMPAGNIE (qui joue quoi) :');
+  for (const c of a.characters) {
+    const cls = a.classPool.find((cl) => cl.name === c.charClass);
+    const stats = Object.entries(c.stats).map(([k, v]) => `${k} ${v}`).join(', ');
+    const inv = c.inventory.map((i) => (i.qty > 1 ? `${i.name} x${i.qty}` : i.name)).filter(Boolean).join(', ');
+    L.push(`- ${c.name || c.playerName} (joué par ${c.playerName})`);
+    L.push(`  Classe : ${c.charClass || 'aucune'}${cls?.ability ? ` — atout : ${cls.ability}` : ''}`);
+    L.push(`  PV : ${c.hp.current}/${c.hp.max}${stats ? ` · ${stats}` : ''}`);
+    if (inv) L.push(`  Inventaire : ${inv}`);
+    if (cls?.hook) L.push(`  Accroche : ${cls.hook}`);
+  }
+  if (a.ai?.summary) { L.push(''); L.push(`Résumé des événements précédents : ${a.ai.summary}`); }
+  const recent = a.story.slice(-6);
+  if (recent.length) {
+    L.push(''); L.push('Récit récent :');
+    for (const t of recent) L.push(`  ${t.role === 'gm' ? 'MJ' : t.author} : ${t.content}`);
+  }
+  const subs = a.actionRound?.submissions ?? [];
+  if (subs.length) {
+    L.push(''); L.push(`Actions soumises (tour ${a.actionRound.number}) :`);
+    for (const s of subs) L.push(`  ${s.author} : ${s.text}`);
+  }
+  L.push('');
+  if (!hasRecit) {
+    L.push("MAINTENANT : écris la SCÈNE D'OUVERTURE pour ces personnages, en commençant par une ligne « @récit » seule.");
+    L.push("Plante le décor, donne-leur une accroche immédiate liée à leurs classes, et termine en leur rendant la main.");
+  } else {
+    L.push("MAINTENANT : continue l'histoire à partir d'ici (commence par une ligne « @récit » seule).");
+    L.push("Si l'état d'un personnage change, termine par un bloc « @maj … @fin ».");
+  }
+  return L.join('\n');
+}
+
 function buildBriefing(): string {
   const a = state.adv!;
   const players = a.characters.map((c) => `- ${c.playerName}`).join('\n');
+  const depth = a.conceptionDepth ?? 3;
+  const count = a.classCount ?? 5;
+  const { rounds, repartition } = affinagePlan(depth);
   const L: string[] = [];
-  L.push("Tu es le maître du jeu (MJ) d'une partie de jeu de rôle. On joue via une appli compagnon : je colle tes réponses, elles s'affichent pour toute la table.");
+
+  L.push("Tu es le maître du jeu (MJ) d'une partie de jeu de rôle sur table. On joue via une appli compagnon : je colle tes réponses, elles s'affichent pour toute la table et mettent à jour les fiches. On va concevoir la campagne ENSEMBLE, en deux temps, avant de lancer la partie.");
   L.push('');
-  L.push(`Univers / thème : ${a.theme || 'libre, à toi de proposer'}`);
-  if (a.description) L.push(`Description du monde : ${a.description}`);
+  L.push('VOICI CE QUE J\'AI DÉFINI POUR CETTE CAMPAGNE');
+  L.push(`- Univers / thème : ${a.theme || 'libre, à toi de proposer'}`);
+  if (a.description) L.push(`- Description du monde : ${a.description}`);
+  L.push(`- Ton souhaité : ${a.tone || '(non précisé — propose ce qui sert le mieux l\'univers)'}`);
+  L.push(`- Niveau de danger : ${a.dangerLevel || '(non précisé)'}`);
+  L.push(`- Source d'inspiration : ${a.inspiration || '(aucune)'}`);
+  L.push('- Joueurs :');
+  L.push(players || '  (aucun)');
+  L.push(`- Caractéristiques utilisées : ${a.statTemplate.join(', ')}`);
+  if (a.inspiration) {
+    L.push('');
+    L.push('⚠️ INSPIRATION — RÈGLE STRICTE : inspire-toi UNIQUEMENT du ton, du rythme et des thèmes de cette source.');
+    L.push("N'emprunte JAMAIS ses noms propres, lieux, personnages, races ou objets reconnaissables.");
+    L.push("Crée un univers 100 % original. Si tu te surprends à réutiliser un nom de la source, change-le.");
+  }
   L.push('');
-  L.push('Joueurs :');
-  L.push(players || '(aucun)');
+  L.push('═'.repeat(70));
+  L.push(`PHASE D'AFFINAGE — en ${rounds} tour${rounds > 1 ? 's' : ''}, ${depth} question${depth > 1 ? 's' : ''} au total`);
   L.push('');
-  L.push('ÉTAPE 1 — LANCEMENT (ce message-ci) : ne raconte PAS encore l\'histoire. Donne seulement :');
-  L.push('- une ligne « @titre <titre de campagne accrocheur> »');
-  L.push('- une ligne « @lieu <lieu de départ, courte phrase d\'ambiance> »');
-  L.push('- un bloc « @classes … @fin » : un POOL de 4 à 6 classes random et créatives pour cet univers,');
-  L.push('  une par ligne, au format : Nom | Stat valeur, Stat valeur, pv valeur | courte description.');
-  L.push(`  Utilise ces caractéristiques : ${a.statTemplate.join(', ')}.`);
+  L.push(`Tu vas affiner la campagne avec moi AVANT de la concevoir, en ${rounds} échange${rounds > 1 ? 's' : ''}.`);
+  L.push(`Répartition prévue : ${repartition}.`);
   L.push('');
-  L.push('Exemple :');
+  L.push('À CHAQUE tour de cette phase :');
+  L.push('1. Commence par un court résumé (2-3 lignes) de la campagne telle que tu la comprends');
+  L.push('   MAINTENANT, en intégrant mes dernières réponses.');
+  L.push('2. Pose ensuite SEULEMENT les questions de ce tour (les plus structurantes d\'abord :');
+  L.push('   l\'enjeu, le rôle des joueurs, les contraintes de ton). Puis attends mes réponses.');
+  L.push('3. Ne produis NI @titre, NI @lieu, NI @classes pendant toute cette phase.');
+  L.push('');
+  L.push('Ne pose que des questions qui changeraient vraiment la campagne. Si à un tour tu n\'as');
+  L.push('plus rien d\'utile à demander, dis-le et propose de passer directement à la conception.');
+  L.push('');
+  L.push(`Quand les ${rounds} tour${rounds > 1 ? 's' : ''} sont terminés (ou plus tôt si tout est clair), passe à la PHASE DE CONCEPTION.`);
+  L.push('');
+  L.push('═'.repeat(70));
+  L.push('PHASE DE CONCEPTION (après tes réponses, en un seul message)');
+  L.push('');
+  L.push('Écris d\'abord, pour moi (MJ), une fiche de campagne — elle reste dans notre chat, je ne la diffuse pas :');
+  L.push('- Pitch en 2-3 phrases.');
+  L.push('- Enjeu principal + 2-3 enjeux secondaires.');
+  L.push('- 3 PNJ clés : nom, rôle, motivation cachée.');
+  L.push('- Squelette en 3 actes (une ligne chacun).');
+  L.push('');
+  L.push('PUIS, et seulement à la fin, le bloc à coller dans l\'appli :');
+  L.push('');
+  L.push('@titre <titre de campagne accrocheur>');
+  L.push('@lieu <lieu de départ, une courte phrase d\'ambiance>');
+  L.push('@classes');
+  L.push('<Nom> | <Stat> <val>, …, pv <val> | <description évocatrice> | équip: <2-4 objets> | atout: <Nom> — <effet> | lien: <rattachement au lore>');
+  L.push(`... (${count} classes au total) ...`);
+  L.push('@fin');
+  L.push('');
+  L.push('Règles pour les classes :');
+  L.push('- équip : 2 à 4 objets de départ, thématiques et cohérents avec la classe ET l\'univers.');
+  L.push('- atout : UNE capacité signature, nommée et formulée en fiction (pas une règle chiffrée).');
+  L.push('- lien : rattache explicitement la classe à un PNJ / enjeu / lieu que TU viens de créer');
+  L.push('  en phase de conception. C\'est ce qui ancre la classe dans le récit.');
+  L.push(`- ÉQUILIBRE : même budget de points au-dessus de la base 10 pour toutes les classes`);
+  L.push('  (vise ~+8 répartis sur les caractéristiques, malus autorisés pour creuser l\'identité).');
+  L.push('  Différencie par la RÉPARTITION, pas par la puissance totale.');
+  L.push(`- Utilise EXACTEMENT ces caractéristiques : ${a.statTemplate.join(', ')}.`);
+  if (a.dangerLevel) L.push(`- Adapte les PV au niveau de danger : ${a.dangerLevel}.`);
+  L.push('');
+  L.push('Exemple de format du bloc final :');
   L.push('@titre Les Cendres de Valdoren');
   L.push('@lieu Aux portes de Cendrebourg, dernier village avant la forêt de Brèche-Noire, au crépuscule.');
   L.push('@classes');
-  L.push('Paladin Déchu | Force 16, Constitution 14, pv 18 | Un serment brisé, une épée fidèle');
-  L.push('Tisseuse d\'arcanes | Intelligence 16, Sagesse 14, pv 12 | Parle aux corbeaux, lit les racines');
+  L.push('Paladin Déchu | Force 16, Constitution 14, pv 18 | Un serment brisé, une épée fidèle | équip: épée longue, bouclier, ration x3 | atout: Dernier Serment — peut ignorer une fois les dégâts mortels | lien: cherche à racheter sa faute auprès du PNJ "Mère Aldris"');
+  L.push('Tisseuse d\'arcanes | Intelligence 16, Sagesse 14, Charisme 8, pv 10 | Parle aux corbeaux, lit les racines | équip: grimoire de camp, encre de cendre, dague | atout: Mémoire des Ruines — comprend les inscriptions anciennes | lien: détient la clé du Premier Acte sans le savoir');
   L.push('@fin');
   L.push('');
-  L.push('Les joueurs piocheront leur classe dans l\'appli, puis je te dirai qui a pris quoi : tu pourras alors écrire la scène d\'ouverture.');
-  L.push('');
-  L.push('ÉTAPE 2 et suivantes — EN JEU : commence chaque message par une ligne « @récit » seule, puis ta narration (titres ## , paragraphes, dialogues avec —). Tout ce qui précède @récit est ignoré par l\'appli, donc tu peux réfléchir avant. Quand un personnage change d\'état, ajoute un bloc « @maj … @fin » (Nom: pv -5, +objet, Stat +1, note: …). N\'utilise pas d\'artefact, écris dans le fil.');
+  L.push('Ensuite, les joueurs piocheront leur classe dans l\'appli et je te dirai qui a pris quoi :');
+  L.push('tu écriras alors la scène d\'ouverture (en commençant par une ligne « @récit » seule).');
   return L.join('\n');
 }
 async function loadAiStatusBanner() {
@@ -755,7 +944,7 @@ async function loadAiStatusBanner() {
   } catch { /* ignore */ }
 }
 function initRelay() {
-  $('#copy-briefing').addEventListener('click', () => copyToClipboard(buildBriefing(), 'Briefing copié — colle-le dans ton chat Claude.'));
+  $('#copy-briefing').addEventListener('click', () => copyToClipboard(buildStateBriefing(), 'État de la table copié — colle-le dans ton chat Claude.'));
   $('#narration-send').addEventListener('click', () => { const ta = $('#narration-input') as HTMLTextAreaElement; requestNarration(ta.value, () => { ta.value = ''; }); });
   ($('#narration-input') as HTMLTextAreaElement).addEventListener('keydown', (e) => { const k = e as KeyboardEvent; if (k.key === 'Enter' && (k.ctrlKey || k.metaKey)) { e.preventDefault(); const ta = $('#narration-input') as HTMLTextAreaElement; requestNarration(ta.value, () => { ta.value = ''; }); } });
   $('#ai-generate').addEventListener('click', () => state.socket.emit('ai:generate'));

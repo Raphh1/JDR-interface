@@ -45,9 +45,15 @@ FORMAT DE SORTIE (impératif)
    @titre <titre de campagne accrocheur>
    @lieu <lieu de départ, une courte phrase d'ambiance>
    @classes
-   <Nom> | <Stat> <n>, <Stat> <n>, pv <n> | <courte description>
-   ... (4 à 6 classes créatives adaptées à l'univers, une par ligne) ...
+   <Nom> | <Stat> <n>, …, pv <n> | <description> | équip: <obj, obj> | atout: <Nom> — <effet> | lien: <rattachement au lore>
+   ... (autant de classes que demandé dans le briefing, une par ligne) ...
    @fin
+
+   Segments du format @classes (ordre libre, tous facultatifs — l'app les parse automatiquement) :
+   - équip: <obj1>, <obj2>  → objets de départ, matérialisés dans l'inventaire à la pioche
+   - atout: <Nom> — <effet> → capacité signature, affichée sur la carte et la fiche
+   - lien: <texte>          → rattachement à un PNJ / enjeu / lieu du lore conçu ensemble
+
    Les joueurs piocheront leur classe dans l'appli, puis on te dira qui a pris quoi : tu
    écriras alors la scène d'ouverture (en commençant par @récit).
 

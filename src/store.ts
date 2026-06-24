@@ -36,6 +36,11 @@ interface CreateInput {
   description?: string;
   players: string[];
   statTemplate?: string[];
+  tone?: string;
+  dangerLevel?: string;
+  inspiration?: string;
+  conceptionDepth?: number;
+  classCount?: number;
 }
 
 export function createAdventure(input: CreateInput): Adventure {
@@ -75,7 +80,29 @@ export function createAdventure(input: CreateInput): Adventure {
     story: [],
     actionRound: { number: 1, submissions: [] },
     ai: { model: 'claude-haiku-4-5', summary: '' },
+    tone: String(input.tone || '').trim(),
+    dangerLevel: String(input.dangerLevel || '').trim(),
+    inspiration: String(input.inspiration || '').trim(),
+    conceptionDepth: Math.min(10, Math.max(1, Number.isFinite(input.conceptionDepth) ? (input.conceptionDepth as number) : 3)),
+    classCount: Math.min(8, Math.max(3, Number.isFinite(input.classCount) ? (input.classCount as number) : 5)),
+    lore: '',
   };
+}
+
+// Migration douce : remplit les champs absents des anciennes aventures.
+export function normalize(adv: Adventure): Adventure {
+  adv.tone ??= '';
+  adv.dangerLevel ??= '';
+  adv.inspiration ??= '';
+  adv.conceptionDepth ??= 3;
+  adv.classCount ??= 5;
+  adv.lore ??= '';
+  for (const cls of adv.classPool) {
+    cls.equipment ??= [];
+    cls.ability ??= '';
+    cls.hook ??= '';
+  }
+  return adv;
 }
 
 export async function loadAll(): Promise<Adventure[]> {
@@ -86,7 +113,7 @@ export async function loadAll(): Promise<Adventure[]> {
     if (!f.endsWith('.json')) continue;
     try {
       const raw = await fs.readFile(path.join(DATA_DIR, f), 'utf8');
-      const adv = JSON.parse(raw) as Adventure;
+      const adv = normalize(JSON.parse(raw) as Adventure);
       cache.set(adv.id, adv);
       list.push(adv);
     } catch (e) {

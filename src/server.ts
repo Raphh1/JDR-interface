@@ -61,7 +61,7 @@ function sortedSummaries() {
 app.get('/api/adventures', (_req: Request, res: Response) => res.json(sortedSummaries()));
 
 app.post('/api/adventures', (req: Request, res: Response) => {
-  const { title, theme, description, players, statTemplate } = req.body || {};
+  const { title, theme, description, players, statTemplate, tone, dangerLevel, inspiration, conceptionDepth, classCount } = req.body || {};
   const cleanPlayers = Array.isArray(players)
     ? players.map((p: unknown) => String(p).trim()).filter(Boolean)
     : [];
@@ -69,7 +69,7 @@ app.post('/api/adventures', (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Au moins 2 joueurs requis.' });
   }
   const finalTitle = String(title || '').trim() || 'Aventure sans titre';
-  const adv = store.createAdventure({ title: finalTitle, theme, description, players: cleanPlayers, statTemplate });
+  const adv = store.createAdventure({ title: finalTitle, theme, description, players: cleanPlayers, statTemplate, tone, dangerLevel, inspiration, conceptionDepth, classCount });
   store.put(adv);
   res.status(201).json(store.summary(adv));
   broadcastList();
@@ -191,9 +191,9 @@ async function removeUploads(srcs: string[]): Promise<void> {
 }
 
 // Applique les éléments de setup/màj issus du relais ou de l'IA, puis diffuse.
-function applyAndBroadcast(advId: string, raw: string): { clean: string; applied: string[] } {
+function applyAndBroadcast(advId: string, raw: string): { clean: string; applied: string[]; hasClasses: boolean } {
   const adv = store.get(advId);
-  if (!adv) return { clean: raw, applied: [] };
+  if (!adv) return { clean: raw, applied: [], hasClasses: false };
   const r: ApplyResult = applyGmUpdates(adv, raw);
 
   if (r.title && r.title !== adv.title) {
@@ -221,7 +221,7 @@ function applyAndBroadcast(advId: string, raw: string): { clean: string; applied
     io.to(advId).emit('story:add', recap);
   }
   store.put(adv);
-  return { clean: r.clean, applied: r.applied };
+  return { clean: r.clean, applied: r.applied, hasClasses: !!(r.classes && r.classes.length) };
 }
 
 function activeCharacters(adv: Adventure) {
@@ -252,10 +252,16 @@ function relayNarration(advId: string, text: string): { ok: boolean; clean: stri
   if (!adv) return { ok: false, clean: '', applied: [] };
   const content = String(text || '').trim();
   if (!content) return { ok: false, clean: '', applied: [] };
-  const { clean, applied } = applyAndBroadcast(advId, content);
-  if (clean) {
+  const { clean, applied, hasClasses } = applyAndBroadcast(advId, content);
+  const fresh = store.get(advId)!;
+  if (clean && hasClasses) {
+    // Message de conception (avec @classes) : le texte libre est le LORE de campagne
+    // (pitch/PNJ/intrigue). On le garde côté MJ et on ne le diffuse PAS dans le récit.
+    fresh.lore = clean;
+    touch(fresh);
+    io.to(advId).emit('adventure:lore', { lore: fresh.lore });
+  } else if (clean) {
     const turn = { id: store.newId(), role: 'gm' as const, author: 'MJ', content: clean, timestamp: new Date().toISOString() };
-    const fresh = store.get(advId)!;
     fresh.story.push(turn);
     touch(fresh);
     io.to(advId).emit('story:add', turn);
@@ -273,6 +279,7 @@ function previewNarration(advId: string, text: string) {
 function bridgeState(adv: Adventure) {
   return {
     id: adv.id, title: adv.title, theme: adv.theme, description: adv.description,
+    tone: adv.tone, dangerLevel: adv.dangerLevel,
     phase: adv.phase, startLocation: adv.startLocation, statTemplate: adv.statTemplate,
     classPool: adv.classPool.map((c) => c.name),
     characters: adv.characters.map((c) => ({
@@ -384,6 +391,8 @@ io.on('connection', (socket: Socket) => {
     for (const stat of adv.statTemplate) if (!(stat in c.stats)) c.stats[stat] = 10;
     for (const [k, v] of Object.entries(cls.stats)) c.stats[k] = v;
     c.hp = { current: cls.hp || 10, max: cls.hp || 10 };
+    // Équipement de départ : remplacement total (pas d'accumulation si re-pioche en lobby).
+    c.inventory = (cls.equipment ?? []).map((name) => ({ id: store.newId(), name, qty: 1, notes: '' }));
     touch(adv);
     io.to(advId!).emit('character:updated', c);
   });

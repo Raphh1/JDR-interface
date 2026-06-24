@@ -113,3 +113,59 @@ test('ne mute pas un personnage non concerné', () => {
   const alice = adv.characters.find((c) => c.playerName === 'Alice')!;
   assert.deepEqual(alice.hp, { current: 10, max: 10 });
 });
+
+// --- Nouveaux tests : format @classes enrichi ---
+
+test('@classes : segments équip/atout/lien parsés', () => {
+  const adv = makeAdv();
+  const r = applyGmUpdates(adv,
+    '@classes\n' +
+    'Rôdeur | Dextérité 16, pv 14 | Traque dans l\'ombre | équip: arc long, 12 flèches, cape | atout: Œil de braise — voit dans le noir | lien: cherche le Cendrier\n' +
+    '@fin'
+  );
+  const cls = r.classes?.[0]!;
+  assert.equal(cls.name, 'Rôdeur');
+  assert.equal(cls.description, 'Traque dans l\'ombre');
+  assert.deepEqual(cls.equipment, ['arc long', '12 flèches', 'cape']);
+  assert.equal(cls.ability, 'Œil de braise — voit dans le noir');
+  assert.equal(cls.hook, 'cherche le Cendrier');
+  assert.equal(cls.stats['Dextérité'], 16);
+  assert.equal(cls.hp, 14);
+});
+
+test('@classes : segments dans un ordre différent', () => {
+  const adv = makeAdv();
+  const r = applyGmUpdates(adv,
+    '@classes\n' +
+    'Mage | Force 8, pv 10 | Arcaniste | lien: gardien du secret | atout: Mémoire vive — retient tout | équip: grimoire, encre\n' +
+    '@fin'
+  );
+  const cls = r.classes?.[0]!;
+  assert.equal(cls.hook, 'gardien du secret');
+  assert.equal(cls.ability, 'Mémoire vive — retient tout');
+  assert.deepEqual(cls.equipment, ['grimoire', 'encre']);
+});
+
+test('@classes : sans segments enrichis (ancien format, rétrocompatible)', () => {
+  const adv = makeAdv();
+  const r = applyGmUpdates(adv,
+    '@classes\nPaladin | Force 16, pv 18 | Un serment brisé\n@fin'
+  );
+  const cls = r.classes?.[0]!;
+  assert.equal(cls.name, 'Paladin');
+  assert.equal(cls.description, 'Un serment brisé');
+  assert.deepEqual(cls.equipment, []);
+  assert.equal(cls.ability, '');
+  assert.equal(cls.hook, '');
+});
+
+test('@classes : segment équip sans atout ni lien', () => {
+  const adv = makeAdv();
+  const r = applyGmUpdates(adv,
+    '@classes\nGuerrier | Force 18, pv 16 | Colosse | équip: hache, bouclier\n@fin'
+  );
+  const cls = r.classes?.[0]!;
+  assert.deepEqual(cls.equipment, ['hache', 'bouclier']);
+  assert.equal(cls.ability, '');
+  assert.equal(cls.hook, '');
+});

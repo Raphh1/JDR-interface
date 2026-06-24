@@ -147,6 +147,9 @@ futur petit interrupteur dans Paramètres.
 - **Tests** : ✅ `npm test` (node:test/tsx) sur `gmsync` / `presence` / `store`.
 - **3 mois** (si scope Internet) : ✅ extension pont navigateur (`extension/`) · ✅ serveur MCP (`mcp/`) ·
   ⬜ état versionné + identité joueur · ⬜ exécutable unique/Docker · ⬜ HTTPS + code de table.
+- **Conception enrichie** (`feat/conception-campagne`) : ✅ critères de conception (ton, danger, inspiration,
+  profondeur 1–10, pool 3–8 classes) · ✅ classes ancrées dans le récit (équip/atout/lien, budget équilibré) ·
+  ✅ `buildBriefing` phase d'affinage paramétrée (1/2/3 tours selon profondeur) · ✅ `normalize()` migration douce.
 
 ## Règles de travail
 - Audit/design demandés jusqu'ici sans modif de fichiers. Avant d'implémenter : confirmer le scope.

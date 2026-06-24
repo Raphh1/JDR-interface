@@ -120,13 +120,20 @@ function clip(s: string): string {
   return s.trim().replace(/^["«»“”]+|["«»“”]+$/g, '').trim();
 }
 
-// Parse une ligne de classe : « Nom | Force 16, pv 18 | description ».
+// Segments étiquetés reconnus après la description (ordre libre, casse/accents tolérés).
+const SEG_EQUIP  = /^(equip|équip)\s*:\s*/i;
+const SEG_ATOUT  = /^atout\s*:\s*/i;
+const SEG_LIEN   = /^(lien|hook)\s*:\s*/i;
+
+// Parse une ligne de classe (rétrocompatible avec l'ancien format sans segments).
+// Format enrichi : « Nom | Stat n, pv n | description | équip: obj, obj | atout: Nom — effet | lien: … »
 function parseClassLine(raw: string): ClassDef | null {
   const line = raw.trim();
   if (!line) return null;
   const parts = line.split('|').map((s) => s.trim());
   const name = (parts[0] || '').replace(/^[-*•\s]+/, '').trim();
   if (!name) return null;
+
   const stats: Record<string, number> = {};
   let hp = 10;
   if (parts[1]) {
@@ -139,7 +146,27 @@ function parseClassLine(raw: string): ClassDef | null {
       else stats[key] = val;
     }
   }
-  return { id: newId(), name, description: parts.slice(2).join(' | ').trim(), stats, hp };
+
+  // À partir de parts[2] : description + segments étiquetés (ordre libre).
+  let description = '';
+  const equipment: string[] = [];
+  let ability = '';
+  let hook = '';
+
+  for (let i = 2; i < parts.length; i++) {
+    const p = parts[i];
+    if (SEG_EQUIP.test(p)) {
+      equipment.push(...p.replace(SEG_EQUIP, '').split(',').map((s) => s.trim()).filter(Boolean));
+    } else if (SEG_ATOUT.test(p)) {
+      ability = p.replace(SEG_ATOUT, '').trim();
+    } else if (SEG_LIEN.test(p)) {
+      hook = p.replace(SEG_LIEN, '').trim();
+    } else {
+      description = description ? `${description} | ${p}` : p;
+    }
+  }
+
+  return { id: newId(), name, description, stats, hp, equipment, ability, hook };
 }
 
 function matchChar(chars: Character[], who: string): Character | undefined {

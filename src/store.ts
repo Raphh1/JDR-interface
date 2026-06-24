@@ -63,6 +63,7 @@ export function createAdventure(input: CreateInput): Adventure {
     description: String(input.description || '').trim(),
     statTemplate: stats,
     startLocation: '',
+    mjName: '',
     phase: 'lobby',
     classPool: [],
     createdAt: now,

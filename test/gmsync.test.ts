@@ -87,6 +87,20 @@ test('sans @récit : tout le texte (nettoyé des blocs) devient la narration', (
   assert.equal(r.clean, 'Une simple narration sans marqueur.');
 });
 
+test('message de setup seul (titre/lieu/classes) → narration vide (pas de récit fantôme)', () => {
+  const adv = makeAdv();
+  const r = applyGmUpdates(adv, '@titre Les Boyaux du Roi-Charogne\n@lieu Au pied des remparts\n@classes\nÉcorcheur | Force 16, pv 18 | Pille les tombes\n@fin');
+  assert.equal(r.title, 'Les Boyaux du Roi-Charogne');
+  assert.equal(r.classes?.length, 1);
+  assert.equal(r.clean, '');  // surtout PAS le bloc brut → sinon il devient un tour de récit
+});
+
+test('bloc @maj seul (pas de narration) → narration vide', () => {
+  const adv = makeAdv();
+  const r = applyGmUpdates(adv, '@maj\nBob: pv -5\n@fin');
+  assert.equal(r.clean, '');
+});
+
 test('le chrome avant @récit est ignoré', () => {
   const adv = makeAdv();
   const r = applyGmUpdates(adv, 'Claude\n12:34\nVoici ma réponse\n@récit\nLa vraie narration.');

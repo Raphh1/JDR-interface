@@ -11,7 +11,7 @@ interface StoryTurn { id: string; role: 'player' | 'gm' | 'system'; author: stri
 interface ActionSubmission { characterId: string; author: string; text: string; }
 interface Adventure {
   id: string; title: string; theme: string; description: string; statTemplate: string[];
-  startLocation: string; phase: 'lobby' | 'play'; classPool: ClassDef[];
+  startLocation: string; mjName: string; phase: 'lobby' | 'play'; classPool: ClassDef[];
   archived: boolean; characters: Character[]; rolls: Roll[]; gallery: GalleryItem[];
   story: StoryTurn[]; actionRound: { number: number; submissions: ActionSubmission[] }; ai: { model: string; summary: string };
 }
@@ -51,8 +51,8 @@ async function copyToClipboard(text: string, okMsg: string) {
 
 // ---- État ----
 const state = {
-  name: localStorage.getItem('jdr-name') || '',
-  isMj: localStorage.getItem('jdr-mj') === '1',  // relaie aussi le MJ (Claude) ; voit le panneau de relais
+  name: localStorage.getItem('jdr-name') || '',  // nom par défaut (pré-remplissage)
+  isMj: false,  // DÉRIVÉ de adv.mjName (autoritatif serveur), pas d'un flag local
   adv: null as Adventure | null,
   joinedId: null as string | null,  // aventure à laquelle on doit rester (re)connecté
   socket: null as any,
@@ -61,6 +61,13 @@ const state = {
 function myCharacter(): Character | null {
   return state.adv?.characters.find((c) => c.playerName === state.name) || null;
 }
+// Identité PAR-AVENTURE : on ne réutilise jamais un nom/rôle périmé d'une autre partie
+// (cause des fiches fantômes / doublons au retour). Le nom global ne sert qu'à pré-remplir.
+const sameOwner = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+const savedNameFor = (id: string) => localStorage.getItem('jdr-id:' + id) || '';
+const claimMjFor = (id: string) => localStorage.getItem('jdr-claimmj:' + id) === '1';
+function recomputeMj() { state.isMj = !!(state.adv && state.adv.mjName && sameOwner(state.name, state.adv.mjName)); }
+function updateMeName() { $('#me-name').textContent = state.name + (state.isMj ? ' · 🎙 MJ' : ''); }
 
 // ===========================================================================
 // Routeur
@@ -162,6 +169,8 @@ async function submitCreate() {
   const res = await fetch('/api/adventures', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, theme, description, players, statTemplate }) });
   if (!res.ok) { err.textContent = (await res.json()).error || 'Erreur.'; return; }
   const adv: AdventureSummary = await res.json();
+  // Le créateur est l'assistant-MJ d'office (revendication enregistrée au prochain join).
+  localStorage.setItem('jdr-claimmj:' + adv.id, '1');
   location.hash = `#/play/${adv.id}`;
 }
 
@@ -169,12 +178,21 @@ async function submitCreate() {
 // Connexion à une aventure
 // ===========================================================================
 function ensureSocket() { if (!state.socket) { state.socket = io(); wireSocket(state.socket); } }
-function leaveAdventure() { state.adv = null; state.joinedId = null; state.revealed.clear(); }
+function leaveAdventure() { state.adv = null; state.joinedId = null; state.isMj = false; state.revealed.clear(); }
 async function enterAdventure(id: string) {
   const res = await fetch(`/api/adventures/${id}`);
   if (!res.ok) { toast('Aventure introuvable.'); location.hash = '#/'; return; }
   const adv: Adventure = await res.json();
-  if (!state.name) { askName(adv, id); return; }
+  // On ne rejoint en silence QUE si l'identité enregistrée pour CETTE aventure est encore
+  // valide (un personnage existant, ou le rôle MJ). Sinon, on (re)demande qui on est.
+  const saved = savedNameFor(id);
+  const valid = !!saved && (
+    adv.characters.some((c) => sameOwner(c.playerName, saved)) ||
+    (!!adv.mjName && sameOwner(adv.mjName, saved)) ||
+    claimMjFor(id)
+  );
+  if (!valid) { askName(adv, id); return; }
+  state.name = saved;
   doJoin(id);
 }
 function askName(adv: Adventure, id: string) {
@@ -185,20 +203,30 @@ function askName(adv: Adventure, id: string) {
     adv.characters.map((c) => `<option value="${esc(c.playerName)}">${esc(c.playerName)}${c.name ? ` (${esc(c.name)})` : ''}</option>`).join('') +
     '<option value="__mj__">— MJ sans personnage (spectateur) —</option>';
   claim.classList.remove('hidden');
-  input.value = ''; input.focus();
-  // Case MJ : indépendante du personnage. On peut jouer son perso ET relayer Claude.
+  // Pré-remplit avec le nom par défaut s'il correspond à un personnage de cette aventure.
+  input.value = adv.characters.some((c) => sameOwner(c.playerName, state.name)) ? state.name : '';
+  input.focus();
+  // Case MJ : indépendante du personnage (on peut jouer son perso ET relayer Claude).
+  // - MJ déjà pris par quelqu'un d'autre → option masquée (rôle non volable).
+  // - Créateur (claimMj) → MJ imposé (coché + verrouillé).
   const mj = $('#name-mj') as HTMLInputElement;
-  $('#mj-toggle-row').classList.remove('hidden');
-  mj.checked = state.isMj;
+  const mjRow = $('#mj-toggle-row');
+  const creator = claimMjFor(id);
+  const mjTaken = !!adv.mjName && !creator;
+  mjRow.classList.toggle('hidden', mjTaken);
+  mj.checked = creator;
+  mj.disabled = creator;
   claim.onchange = () => {
-    if (claim.value === '__mj__') { input.value = 'MJ'; mj.checked = true; mj.disabled = true; }
-    else { input.value = claim.value; mj.disabled = false; }
+    if (claim.value === '__mj__') { input.value = 'MJ'; if (!mjTaken) { mj.checked = true; mj.disabled = true; } }
+    else { input.value = claim.value; mj.disabled = creator; if (!creator) mj.checked = false; }
   };
   const confirm = () => {
     const name = input.value.trim(); if (!name) return;
-    state.name = name; localStorage.setItem('jdr-name', name);
-    state.isMj = mj.checked || claim.value === '__mj__';
-    localStorage.setItem('jdr-mj', state.isMj ? '1' : '');
+    state.name = name;
+    localStorage.setItem('jdr-name', name);          // défaut global (pré-remplissage)
+    localStorage.setItem('jdr-id:' + id, name);      // identité de CETTE aventure
+    const wantMj = (!mjRow.classList.contains('hidden') && mj.checked) || claim.value === '__mj__';
+    localStorage.setItem('jdr-claimmj:' + id, wantMj ? '1' : '');
     modal.classList.add('hidden'); doJoin(id);
   };
   ($('#name-confirm') as HTMLButtonElement).onclick = confirm;
@@ -207,7 +235,6 @@ function askName(adv: Adventure, id: string) {
 function doJoin(id: string) {
   ensureSocket();
   state.joinedId = id;
-  $('#me-name').textContent = state.name + (state.isMj ? ' · 🎙 MJ' : '');
   emitJoin(id, true);
 }
 // Le panneau de relais (coller la réponse de Claude) n'est montré qu'au MJ : les autres
@@ -220,9 +247,10 @@ function applyMjUI() {
 // sans changer de vue). Le snapshot serveur fait autorité : on REMPLACE state.adv, on
 // ne concatène jamais — c'est ce qui rattrape les events manqués hors-ligne.
 function emitJoin(id: string, initial: boolean) {
-  state.socket.emit('join', { adventureId: id, name: state.name }, (resp: any) => {
+  state.socket.emit('join', { adventureId: id, name: state.name, claimMj: claimMjFor(id) }, (resp: any) => {
     if (resp?.error) { toast(resp.error); state.joinedId = null; location.hash = '#/'; return; }
     state.adv = resp.adventure; state.revealed.clear();
+    recomputeMj(); updateMeName();
     if (initial) { showView('table'); $('#topbar').classList.remove('hidden'); }
     updateTitle();
     if (!$('#view-table').classList.contains('hidden')) renderTable();
@@ -280,6 +308,14 @@ function wireSocket(socket: any) {
   socket.on('ai:thinking', ({ on }: { on: boolean }) => setThinking(on));
   socket.on('ai:error', ({ error }: { error: string }) => toast(error));
   socket.on('ai:model', ({ model }: { model: string }) => { if (state.adv) state.adv.ai = { ...(state.adv.ai || { summary: '' }), model }; });
+  // MJ assigné (autoritatif) : on (re)dérive notre rôle et on rafraîchit l'UI de relais.
+  socket.on('adventure:mj', ({ mjName }: { mjName: string }) => {
+    if (!state.adv) return;
+    state.adv.mjName = mjName;
+    recomputeMj(); updateMeName();
+    if (state.adv.phase === 'lobby') renderLobby(); else applyMjUI();
+  });
+  socket.on('notice', ({ error }: { error: string }) => toast(error));
   socket.on('presence', ({ type, name }: { type: string; name: string }) => toast(`${name} ${type === 'join' ? 'a rejoint' : 'a quitté'} la table`));
   socket.on('presence:list', (names: string[]) => renderPresence(names));
   socket.on('adventures:list', (list: AdventureSummary[]) => { if (!location.hash || location.hash === '#/') drawAdventureList(list); });
@@ -336,8 +372,11 @@ function renderLobby() {
         elem('span', { class: 'roster-name' }, [c.name || c.playerName]),
         elem('span', { class: 'roster-class' }, [c.charClass ? `⚔ ${c.charClass}` : '⏳ choisit sa classe…']),
       ]))),
-      elem('button', { class: 'btn btn-primary btn-big', disabled: !allPicked, onclick: () => state.socket.emit('game:start') }, [allPicked ? "🔥 Lancer l'aventure" : 'En attente des choix…']),
-      allPicked ? elem('p', { class: 'hint' }, ['Astuce MJ : après le lancement, dis à Claude qui a pioché quelle classe pour qu\'il démarre la scène d\'ouverture.']) : elem('span', {}, []),
+      // Seul le MJ lance l'aventure (le serveur le vérifie aussi) ; les autres patientent.
+      state.isMj
+        ? elem('button', { class: 'btn btn-primary btn-big', disabled: !allPicked, onclick: () => state.socket.emit('game:start') }, [allPicked ? "🔥 Lancer l'aventure" : 'En attente des choix…'])
+        : elem('p', { class: 'hint' }, [allPicked ? "En attente que l'assistant-MJ lance l'aventure…" : 'En attente des choix…']),
+      state.isMj && allPicked ? elem('p', { class: 'hint' }, ['Astuce MJ : après le lancement, dis à Claude qui a pioché quelle classe pour qu\'il démarre la scène d\'ouverture.']) : elem('span', {}, []),
     ]));
     // Permet au MJ de re-coller (ex: pour corriger les classes). Réservé au MJ.
     if (state.isMj) {

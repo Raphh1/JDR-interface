@@ -283,7 +283,13 @@ io.on('connection', (socket: Socket) => {
   let advId: string | null = socket.recovered ? (socket.data.advId ?? null) : null;
   let playerName: string = socket.recovered ? (socket.data.playerName ?? 'Joueur') : 'Joueur';
 
-  socket.on('join', ({ adventureId, name }: { adventureId: string; name: string }, cb?: (p?: unknown) => void) => {
+  // Ce socket est-il le MJ de l'aventure ? Autoritatif : repose sur adv.mjName, pas sur
+  // un flag client. Tant qu'aucun MJ n'est assigné (adv.mjName === ''), on reste permissif
+  // (aventures legacy d'avant le MJ autoritatif).
+  const amMj = (adv: Adventure): boolean => !!adv.mjName && sameOwner(playerName, adv.mjName);
+  const mjAllows = (adv: Adventure): boolean => !adv.mjName || amMj(adv);
+
+  socket.on('join', ({ adventureId, name, claimMj }: { adventureId: string; name: string; claimMj?: boolean }, cb?: (p?: unknown) => void) => {
     const adv = store.get(adventureId);
     if (!adv) return cb && cb({ error: 'Aventure introuvable.' });
     if (advId) socket.leave(advId);
@@ -292,6 +298,13 @@ io.on('connection', (socket: Socket) => {
     socket.data.advId = advId;          // persisté pour la récupération d'état
     socket.data.playerName = playerName;
     socket.join(advId);
+    // MJ autoritatif : le créateur (claimMj) prend le rôle si aucun MJ n'est encore assigné.
+    // Premier arrivé qui revendique gagne ; les suivants sont ignorés (rôle non volable).
+    if (claimMj && !adv.mjName) {
+      adv.mjName = playerName;
+      store.put(adv);
+      io.to(advId).emit('adventure:mj', { mjName: adv.mjName });
+    }
     const { previousAdvId } = presence.join(advId, socket.id, playerName);
     socket.to(advId).emit('presence', { type: 'join', name: playerName });
     emitPresence(advId);
@@ -370,6 +383,9 @@ io.on('connection', (socket: Socket) => {
   socket.on('game:start', () => {
     const adv = requireAdv();
     if (!adv) return;
+    // Impossible de lancer une partie sans MJ ; seul le MJ peut lancer.
+    if (!adv.mjName) return socket.emit('notice', { error: "Aucun MJ : quelqu'un doit relayer le MJ avant de lancer." });
+    if (!amMj(adv)) return socket.emit('notice', { error: "Seul l'assistant-MJ peut lancer l'aventure." });
     adv.phase = 'play';
     touch(adv);
     io.to(advId!).emit('phase:changed', { phase: adv.phase });
@@ -399,7 +415,7 @@ io.on('connection', (socket: Socket) => {
   // --- Tour d'action : nouveau tour (après envoi à Claude) ---
   socket.on('action:reset', () => {
     const adv = requireAdv();
-    if (!adv) return;
+    if (!adv || !mjAllows(adv)) return;
     adv.actionRound = { number: adv.actionRound.number + 1, submissions: [] };
     touch(adv);
     io.to(advId!).emit('action:round', adv.actionRound);
@@ -409,13 +425,16 @@ io.on('connection', (socket: Socket) => {
   // Permet au MJ de vérifier ce qui sera appliqué (fiches, titre, lieu, classes) avant
   // de diffuser → corrige les échecs silencieux du parser @maj.
   socket.on('story:preview', ({ text }: { text: string }, cb?: (p?: unknown) => void) => {
-    if (!requireAdv((e) => cb && cb(e))) return;
+    const adv = requireAdv((e) => cb && cb(e));
+    if (!adv) return;
+    if (!mjAllows(adv)) return cb && cb({ error: "Seul l'assistant-MJ peut relayer." });
     cb && cb(previewNarration(advId!, text));
   });
 
-  // --- Relais manuel de la narration / setup du MJ ---
+  // --- Relais manuel de la narration / setup du MJ (réservé au MJ) ---
   socket.on('story:narration', ({ text }: { text: string }) => {
-    if (!requireAdv()) return;
+    const adv = requireAdv();
+    if (!adv || !mjAllows(adv)) return;
     relayNarration(advId!, text);
   });
 
@@ -423,6 +442,7 @@ io.on('connection', (socket: Socket) => {
   socket.on('ai:generate', async () => {
     const adv = requireAdv((e) => socket.emit('ai:error', e));
     if (!adv) return;
+    if (!mjAllows(adv)) return socket.emit('notice', { error: "Seul l'assistant-MJ peut générer la narration." });
     if (!ai.isAvailable()) {
       io.to(advId!).emit('ai:error', { error: 'IA non disponible — continuez la narration dans votre chat Claude habituel.' });
       return;

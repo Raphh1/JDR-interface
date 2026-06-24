@@ -80,6 +80,7 @@ export interface Adventure {
   description: string;
   statTemplate: string[];
   startLocation: string;     // lieu de départ, affiché en fond du récit
+  mjName: string;            // nom du MJ (l'hôte/créateur) ; '' tant qu'aucun MJ assigné
   phase: Phase;              // 'lobby' (pioche des classes) puis 'play'
   classPool: ClassDef[];     // classes générées par Claude, piochables
   createdAt: string;

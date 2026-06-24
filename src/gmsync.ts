@@ -110,7 +110,10 @@ export function applyGmUpdates(adv: Adventure, text: string): ApplyResult {
       changed.add(char.id);
     }
   }
-  return { clean: clean || text.trim(), applied, changedIds: [...changed], title, startLocation, classes };
+  // NB : `clean` peut être légitimement vide — message purement setup (@titre/@lieu/
+  // @classes) ou pur @maj sans narration. On ne retombe PAS sur `text.trim()`, sinon le
+  // bloc brut entier deviendrait un tour de récit (cf. bug « le récit revient au début »).
+  return { clean, applied, changedIds: [...changed], title, startLocation, classes };
 }
 
 function clip(s: string): string {

@@ -13,6 +13,7 @@ import { Server, type Socket } from 'socket.io';
 import * as store from './store.js';
 import * as ai from './ai.js';
 import * as presence from './presence.js';
+import { uploadFilePath } from './uploads.js';
 import { applyGmUpdates, type ApplyResult } from './gmsync.js';
 import type { Adventure, ClassDef } from './types.js';
 
@@ -78,6 +79,8 @@ app.patch('/api/adventures/:id', (req: Request, res: Response) => {
 });
 
 app.delete('/api/adventures/:id', async (req: Request, res: Response) => {
+  const adv = store.get(req.params.id);
+  if (adv) await removeUploads(adv.gallery.map((g) => g.src));  // purge les images
   await store.remove(req.params.id);
   res.json({ ok: true });
   broadcastList();
@@ -125,6 +128,22 @@ function broadcastList(): void {
 // Diffuse la liste autoritative des présents d'une aventure (noms uniques).
 function emitPresence(id: string): void {
   io.to(id).emit('presence:list', presence.list(id));
+}
+// Supprime du disque les fichiers d'images correspondant à ces src de galerie.
+// Tolérant : un fichier déjà absent n'est pas une erreur.
+async function removeUploads(srcs: string[]): Promise<void> {
+  const dir = path.join(PUBLIC_DIR, 'uploads');
+  for (const src of srcs) {
+    const fp = uploadFilePath(dir, src);
+    if (!fp) continue;
+    try {
+      await fs.unlink(fp);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.error('Suppression image échouée:', (e as Error).message);
+      }
+    }
+  }
 }
 
 // Applique les éléments de setup/màj issus du relais ou de l'IA, puis diffuse.
@@ -365,8 +384,10 @@ io.on('connection', (socket: Socket) => {
   socket.on('gallery:remove', ({ id }: { id: string }) => {
     const adv = requireAdv();
     if (!adv) return;
+    const item = adv.gallery.find((g) => g.id === id);
     adv.gallery = adv.gallery.filter((g) => g.id !== id);
     touch(adv);
+    if (item) removeUploads([item.src]);  // supprime le fichier du disque (best-effort)
     io.to(advId!).emit('gallery:remove', { id });
   });
 

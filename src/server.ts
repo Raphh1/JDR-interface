@@ -21,7 +21,16 @@ const PORT = Number(process.env.PORT) || 3000;
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { maxHttpBufferSize: 8e6 });
+const io = new Server(server, {
+  maxHttpBufferSize: 8e6,
+  // Reconnexions courtes (wifi, veille) : Socket.io restaure les rooms et rejoue les
+  // paquets manqués. NE survit PAS à un restart serveur → le re-join client reste le
+  // filet de sécurité (cf. handler 'connect' côté client).
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 2 * 60 * 1000,
+    skipMiddlewares: true,
+  },
+});
 
 app.use(express.json({ limit: '8mb' }));
 app.use(express.static(PUBLIC_DIR));
@@ -74,6 +83,14 @@ app.delete('/api/adventures/:id', async (req: Request, res: Response) => {
 });
 
 app.get('/api/ai/status', (_req: Request, res: Response) => res.json(ai.status()));
+
+// URLs LAN à partager (pour le bandeau d'accueil). On priorise les adresses 192.168.x.
+app.get('/api/network', (_req: Request, res: Response) => {
+  const urls = localIps()
+    .sort((a, b) => (b.startsWith('192.168.') ? 1 : 0) - (a.startsWith('192.168.') ? 1 : 0))
+    .map((ip) => `http://${ip}:${PORT}`);
+  res.json({ port: PORT, urls });
+});
 
 app.post('/api/adventures/:id/gallery', async (req: Request, res: Response) => {
   const adv = store.get(req.params.id);
@@ -144,8 +161,10 @@ function activeCharacters(adv: Adventure) {
 }
 
 io.on('connection', (socket: Socket) => {
-  let advId: string | null = null;
-  let playerName = 'Joueur';
+  // Sur une reconnexion récupérée (connectionStateRecovery), `socket.data` est restauré :
+  // on retrouve l'aventure et le nom sans attendre le re-join client.
+  let advId: string | null = socket.recovered ? (socket.data.advId ?? null) : null;
+  let playerName: string = socket.recovered ? (socket.data.playerName ?? 'Joueur') : 'Joueur';
 
   socket.on('join', ({ adventureId, name }: { adventureId: string; name: string }, cb?: (p?: unknown) => void) => {
     const adv = store.get(adventureId);
@@ -153,6 +172,8 @@ io.on('connection', (socket: Socket) => {
     if (advId) socket.leave(advId);
     advId = adventureId;
     playerName = String(name || 'Joueur').trim() || 'Joueur';
+    socket.data.advId = advId;          // persisté pour la récupération d'état
+    socket.data.playerName = playerName;
     socket.join(advId);
     socket.to(advId).emit('presence', { type: 'join', name: playerName });
     cb && cb({ adventure: adv });
@@ -263,6 +284,23 @@ io.on('connection', (socket: Socket) => {
     io.to(advId!).emit('action:round', adv.actionRound);
   });
 
+  // --- Aperçu (dry-run) : parse sur un CLONE, ne mute rien, ne diffuse rien. ---
+  // Permet au MJ de vérifier ce qui sera appliqué (fiches, titre, lieu, classes) avant
+  // de diffuser → corrige les échecs silencieux du parser @maj.
+  socket.on('story:preview', ({ text }: { text: string }, cb?: (p?: unknown) => void) => {
+    const adv = requireAdv((e) => cb && cb(e));
+    if (!adv) return;
+    const clone = structuredClone(adv);
+    const r = applyGmUpdates(clone, String(text || ''));
+    cb && cb({
+      clean: r.clean,
+      applied: r.applied,
+      title: r.title,
+      startLocation: r.startLocation,
+      classes: (r.classes || []).map((c) => c.name),
+    });
+  });
+
   // --- Relais manuel de la narration / setup du MJ ---
   socket.on('story:narration', ({ text }: { text: string }) => {
     const adv = requireAdv();
@@ -306,7 +344,8 @@ io.on('connection', (socket: Socket) => {
   socket.on('ai:setModel', ({ model }: { model: string }) => {
     const adv = requireAdv();
     if (!adv) return;
-    if (ai.MODELS[model]) { adv.ai = { ...(adv.ai || {}), model }; store.put(adv); }
+    if (!adv.ai) adv.ai = { model: ai.status().defaultModel, summary: '' };
+    if (ai.MODELS[model]) { adv.ai.model = model; store.put(adv); }
     io.to(advId!).emit('ai:model', { model: adv.ai.model });
   });
 

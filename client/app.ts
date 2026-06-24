@@ -52,7 +52,9 @@ async function copyToClipboard(text: string, okMsg: string) {
 // ---- État ----
 const state = {
   name: localStorage.getItem('jdr-name') || '',
+  isMj: localStorage.getItem('jdr-mj') === '1',  // relaie aussi le MJ (Claude) ; voit le panneau de relais
   adv: null as Adventure | null,
+  joinedId: null as string | null,  // aventure à laquelle on doit rester (re)connecté
   socket: null as any,
   revealed: new Set<string>(),  // ids de tours déjà affichés (pour n'animer que les nouveaux)
 };
@@ -79,6 +81,17 @@ window.addEventListener('hashchange', router);
 // ===========================================================================
 // Accueil
 // ===========================================================================
+// Bandeau « adresse à partager » : récupère l'URL LAN du serveur pour que les amis
+// la copient sans avoir à lire l'IP dans la console.
+async function loadLanShare() {
+  try {
+    const net: { urls: string[] } = await fetch('/api/network').then((r) => r.json());
+    const url = (net.urls && net.urls[0]) || location.origin;
+    $('#lan-url').textContent = url;
+    $('#lan-share').classList.remove('hidden');
+    ($('#lan-copy') as HTMLButtonElement).onclick = () => copyToClipboard(url, 'Lien copié — partage-le à tes amis.');
+  } catch { /* pas d'IP LAN listée : on laisse le bandeau masqué */ }
+}
 async function renderHome() {
   const list: AdventureSummary[] = await fetch('/api/adventures').then((r) => r.json());
   drawAdventureList(list);
@@ -156,7 +169,7 @@ async function submitCreate() {
 // Connexion à une aventure
 // ===========================================================================
 function ensureSocket() { if (!state.socket) { state.socket = io(); wireSocket(state.socket); } }
-function leaveAdventure() { state.adv = null; state.revealed.clear(); }
+function leaveAdventure() { state.adv = null; state.joinedId = null; state.revealed.clear(); }
 async function enterAdventure(id: string) {
   const res = await fetch(`/api/adventures/${id}`);
   if (!res.ok) { toast('Aventure introuvable.'); location.hash = '#/'; return; }
@@ -170,13 +183,22 @@ function askName(adv: Adventure, id: string) {
   const claim = $('#name-claim') as HTMLSelectElement;
   claim.innerHTML = '<option value="">— choisis ton personnage —</option>' +
     adv.characters.map((c) => `<option value="${esc(c.playerName)}">${esc(c.playerName)}${c.name ? ` (${esc(c.name)})` : ''}</option>`).join('') +
-    '<option value="__mj__">Je suis l\'assistant-MJ (je relaie Claude)</option>';
+    '<option value="__mj__">— MJ sans personnage (spectateur) —</option>';
   claim.classList.remove('hidden');
   input.value = ''; input.focus();
-  claim.onchange = () => { input.value = claim.value === '__mj__' ? 'MJ' : claim.value; };
+  // Case MJ : indépendante du personnage. On peut jouer son perso ET relayer Claude.
+  const mj = $('#name-mj') as HTMLInputElement;
+  $('#mj-toggle-row').classList.remove('hidden');
+  mj.checked = state.isMj;
+  claim.onchange = () => {
+    if (claim.value === '__mj__') { input.value = 'MJ'; mj.checked = true; mj.disabled = true; }
+    else { input.value = claim.value; mj.disabled = false; }
+  };
   const confirm = () => {
     const name = input.value.trim(); if (!name) return;
     state.name = name; localStorage.setItem('jdr-name', name);
+    state.isMj = mj.checked || claim.value === '__mj__';
+    localStorage.setItem('jdr-mj', state.isMj ? '1' : '');
     modal.classList.add('hidden'); doJoin(id);
   };
   ($('#name-confirm') as HTMLButtonElement).onclick = confirm;
@@ -184,12 +206,27 @@ function askName(adv: Adventure, id: string) {
 }
 function doJoin(id: string) {
   ensureSocket();
-  $('#me-name').textContent = state.name;
+  state.joinedId = id;
+  $('#me-name').textContent = state.name + (state.isMj ? ' · 🎙 MJ' : '');
+  emitJoin(id, true);
+}
+// Le panneau de relais (coller la réponse de Claude) n'est montré qu'au MJ : les autres
+// joueurs gardent une UI épurée. Seul le MJ "sacrifie" un peu son immersion.
+function applyMjUI() {
+  $('#relay-panel').classList.toggle('hidden', !state.isMj);
+}
+// Émet `join` et applique le snapshot renvoyé. `initial` = première entrée (on bascule
+// sur la vue table) ; sinon c'est une resynchro après reconnexion (on remplace l'état
+// sans changer de vue). Le snapshot serveur fait autorité : on REMPLACE state.adv, on
+// ne concatène jamais — c'est ce qui rattrape les events manqués hors-ligne.
+function emitJoin(id: string, initial: boolean) {
   state.socket.emit('join', { adventureId: id, name: state.name }, (resp: any) => {
-    if (resp?.error) { toast(resp.error); location.hash = '#/'; return; }
+    if (resp?.error) { toast(resp.error); state.joinedId = null; location.hash = '#/'; return; }
     state.adv = resp.adventure; state.revealed.clear();
-    showView('table'); $('#topbar').classList.remove('hidden');
-    updateTitle(); renderTable(); loadAiStatusBanner();
+    if (initial) { showView('table'); $('#topbar').classList.remove('hidden'); }
+    updateTitle();
+    if (!$('#view-table').classList.contains('hidden')) renderTable();
+    loadAiStatusBanner();
   });
 }
 function updateTitle() {
@@ -237,10 +274,16 @@ function wireSocket(socket: any) {
   socket.on('gallery:remove', ({ id }: { id: string }) => { if (!state.adv) return; state.adv.gallery = state.adv.gallery.filter((g) => g.id !== id); renderGallery(); });
   socket.on('ai:thinking', ({ on }: { on: boolean }) => setThinking(on));
   socket.on('ai:error', ({ error }: { error: string }) => toast(error));
-  socket.on('ai:model', ({ model }: { model: string }) => { if (state.adv) state.adv.ai.model = model; });
+  socket.on('ai:model', ({ model }: { model: string }) => { if (state.adv) state.adv.ai = { ...(state.adv.ai || { summary: '' }), model }; });
   socket.on('presence', ({ type, name }: { type: string; name: string }) => toast(`${name} ${type === 'join' ? 'a rejoint' : 'a quitté'} la table`));
+  socket.on('adventures:list', (list: AdventureSummary[]) => { if (!location.hash || location.hash === '#/') drawAdventureList(list); });
   socket.on('disconnect', () => $('#presence').textContent = '⚠ déconnecté…');
-  socket.on('connect', () => $('#presence').textContent = '');
+  // À la reconnexion, Socket.io ouvre une NOUVELLE connexion serveur (hors room) :
+  // il faut re-jouer `join` pour réintégrer l'aventure et rattraper l'état manqué.
+  socket.on('connect', () => {
+    $('#presence').textContent = '';
+    if (state.joinedId) emitJoin(state.joinedId, false);
+  });
 }
 
 // ===========================================================================
@@ -252,7 +295,7 @@ function renderTable() {
   $('#lobby').classList.toggle('hidden', !lobby);
   $('#play').classList.toggle('hidden', lobby);
   if (lobby) renderLobby();
-  else { renderStageLocation(); renderStoryAll(); renderActionBoard(); updateActionButton(); renderPlayers(); renderDiceButtons(); renderDiceHistory(); renderGallery(); }
+  else { applyMjUI(); renderStageLocation(); renderStoryAll(); renderActionBoard(); updateActionButton(); renderPlayers(); renderDiceButtons(); renderDiceHistory(); renderGallery(); }
 }
 
 // ---- Salon ----
@@ -270,12 +313,15 @@ function renderLobby() {
   ]));
 
   if (!hasClasses) {
-    root.append(elem('div', { class: 'panel parchment lobby-setup' }, [
+    const setup: (Node | string)[] = [
       elem('h3', {}, ['En attente des classes du MJ']),
       elem('p', { class: 'hint' }, ["L'assistant-MJ copie le briefing, l'envoie à Claude, et colle la réponse (titre + lieu + classes) ci-dessous."]),
+    ];
+    if (state.isMj) setup.push(
       elem('button', { class: 'btn', onclick: () => copyToClipboard(buildBriefing(), 'Briefing copié — colle-le dans ton chat Claude.') }, ['📋 Copier le briefing pour Claude']),
       buildRelayBox(),
-    ]));
+    );
+    root.append(elem('div', { class: 'panel parchment lobby-setup' }, setup));
   } else {
     root.append(elem('div', { class: 'class-pool' }, adv.classPool.map((cls) => buildClassCard(cls, me))));
     root.append(elem('div', { class: 'panel parchment lobby-roster' }, [
@@ -287,9 +333,11 @@ function renderLobby() {
       elem('button', { class: 'btn btn-primary btn-big', disabled: !allPicked, onclick: () => state.socket.emit('game:start') }, [allPicked ? "🔥 Lancer l'aventure" : 'En attente des choix…']),
       allPicked ? elem('p', { class: 'hint' }, ['Astuce MJ : après le lancement, dis à Claude qui a pioché quelle classe pour qu\'il démarre la scène d\'ouverture.']) : elem('span', {}, []),
     ]));
-    // Permet au MJ de re-coller (ex: pour corriger les classes).
-    const relay = elem('details', { class: 'relay-panel' }, [elem('summary', {}, ['🎙 Re-coller une réponse du MJ']), buildRelayBox()]);
-    root.append(relay);
+    // Permet au MJ de re-coller (ex: pour corriger les classes). Réservé au MJ.
+    if (state.isMj) {
+      const relay = elem('details', { class: 'relay-panel' }, [elem('summary', {}, ['🎙 Re-coller une réponse du MJ']), buildRelayBox()]);
+      root.append(relay);
+    }
   }
 }
 function buildClassCard(cls: ClassDef, me: Character | null): HTMLElement {
@@ -306,16 +354,47 @@ function buildClassCard(cls: ClassDef, me: Character | null): HTMLElement {
 }
 
 // ---- Relais (réutilisé salon + jeu) ----
+interface NarrationPreview { clean: string; applied: string[]; title?: string; startLocation?: string; classes: string[]; }
+
 function sendNarration(text: string) {
   const t = text.trim(); if (!t) return;
   state.socket.emit('story:narration', { text: t });
 }
+// Demande un aperçu (dry-run serveur) puis affiche la confirmation avant de diffuser.
+function requestNarration(text: string, onSent?: () => void) {
+  const t = text.trim(); if (!t) return;
+  state.socket.emit('story:preview', { text: t }, (resp: any) => {
+    if (resp?.error) { toast(resp.error); return; }
+    showNarrationPreview(t, resp as NarrationPreview, onSent);
+  });
+}
+function showNarrationPreview(text: string, p: NarrationPreview, onSent?: () => void) {
+  const body = $('#preview-body'); body.innerHTML = '';
+  const changes: HTMLElement[] = [];
+  if (p.title) changes.push(elem('li', {}, [`📜 Titre : ${p.title}`]));
+  if (p.startLocation) changes.push(elem('li', {}, [`📍 Lieu : ${p.startLocation}`]));
+  if (p.classes?.length) changes.push(elem('li', {}, [`⚔ Classes proposées : ${p.classes.join(', ')}`]));
+  for (const a of p.applied) changes.push(elem('li', {}, [`🛠 ${a}`]));
+
+  if (changes.length) {
+    body.append(elem('p', { class: 'preview-section-title' }, ['Mises à jour détectées :']));
+    body.append(elem('ul', { class: 'preview-changes' }, changes));
+  } else {
+    body.append(elem('p', { class: 'preview-none' }, ['Aucune mise à jour de fiche détectée (narration simple). Si tu attendais un bloc @maj, vérifie son format avant de diffuser.']));
+  }
+  body.append(elem('p', { class: 'preview-section-title' }, ['Narration diffusée :']));
+  body.append(elem('div', { class: 'preview-narration' }, [p.clean || '(vide)']));
+
+  const modal = $('#preview-modal'); modal.classList.remove('hidden');
+  ($('#preview-confirm') as HTMLButtonElement).onclick = () => { modal.classList.add('hidden'); sendNarration(text); onSent && onSent(); };
+  ($('#preview-cancel') as HTMLButtonElement).onclick = () => modal.classList.add('hidden');
+}
 function buildRelayBox(): HTMLElement {
-  const ta = elem('textarea', { rows: 4, placeholder: 'Colle ici la réponse du MJ… (Ctrl+Entrée pour diffuser)' }) as HTMLTextAreaElement;
-  ta.addEventListener('keydown', (e) => { const k = e as KeyboardEvent; if (k.key === 'Enter' && (k.ctrlKey || k.metaKey)) { e.preventDefault(); sendNarration(ta.value); ta.value = ''; } });
+  const ta = elem('textarea', { rows: 4, placeholder: 'Colle ici la réponse du MJ… (Ctrl+Entrée pour vérifier)' }) as HTMLTextAreaElement;
+  ta.addEventListener('keydown', (e) => { const k = e as KeyboardEvent; if (k.key === 'Enter' && (k.ctrlKey || k.metaKey)) { e.preventDefault(); requestNarration(ta.value, () => { ta.value = ''; }); } });
   return elem('div', { class: 'relay-box' }, [
     ta,
-    elem('button', { class: 'btn btn-primary', onclick: () => { sendNarration(ta.value); ta.value = ''; } }, ['Diffuser à la table']),
+    elem('button', { class: 'btn btn-primary', onclick: () => requestNarration(ta.value, () => { ta.value = ''; }) }, ['Aperçu puis diffuser']),
   ]);
 }
 
@@ -606,8 +685,8 @@ async function loadAiStatusBanner() {
 }
 function initRelay() {
   $('#copy-briefing').addEventListener('click', () => copyToClipboard(buildBriefing(), 'Briefing copié — colle-le dans ton chat Claude.'));
-  $('#narration-send').addEventListener('click', () => { const ta = $('#narration-input') as HTMLTextAreaElement; sendNarration(ta.value); ta.value = ''; });
-  ($('#narration-input') as HTMLTextAreaElement).addEventListener('keydown', (e) => { const k = e as KeyboardEvent; if (k.key === 'Enter' && (k.ctrlKey || k.metaKey)) { e.preventDefault(); const ta = $('#narration-input') as HTMLTextAreaElement; sendNarration(ta.value); ta.value = ''; } });
+  $('#narration-send').addEventListener('click', () => { const ta = $('#narration-input') as HTMLTextAreaElement; requestNarration(ta.value, () => { ta.value = ''; }); });
+  ($('#narration-input') as HTMLTextAreaElement).addEventListener('keydown', (e) => { const k = e as KeyboardEvent; if (k.key === 'Enter' && (k.ctrlKey || k.metaKey)) { e.preventDefault(); const ta = $('#narration-input') as HTMLTextAreaElement; requestNarration(ta.value, () => { ta.value = ''; }); } });
   $('#ai-generate').addEventListener('click', () => state.socket.emit('ai:generate'));
 }
 
@@ -623,7 +702,7 @@ async function openSettings() {
   box.innerHTML = lines.join('');
   const select = $('#ai-model-select') as HTMLSelectElement;
   select.innerHTML = Object.entries(s.models).map(([id, m]: any) => `<option value="${id}">${esc(m.label)}</option>`).join('');
-  select.value = state.adv?.ai.model || s.defaultModel;
+  select.value = state.adv?.ai?.model || s.defaultModel;
   select.onchange = () => { if (state.socket && state.adv) state.socket.emit('ai:setModel', { model: select.value }); toast('Modèle mis à jour.'); };
 }
 
@@ -646,8 +725,8 @@ function init() {
   ($('#show-archived') as HTMLInputElement).addEventListener('change', renderHome);
   initCreateButtons(); initTabs(); initGallery(); initRelay(); initActionModal();
 
-  const homeSocket = io();
-  homeSocket.on('adventures:list', (list: AdventureSummary[]) => { if (!location.hash || location.hash === '#/') drawAdventureList(list); });
+  ensureSocket();  // socket unique, réutilisée pour la home ET les aventures (cf. wireSocket)
+  loadLanShare();
   router();
 }
 document.addEventListener('DOMContentLoaded', init);

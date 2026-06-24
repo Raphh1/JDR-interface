@@ -24,6 +24,11 @@ Pas de compte, pas de base de données, pas de service payant.
 
 Toute action (dé, fiche, combat) se propage **instantanément** à tous les joueurs via Socket.io.
 
+> 🧙 **MJ sans IA (mode par défaut)** : vous relayez votre LLM habituel (Claude, ChatGPT…).
+> Pour qu'il respecte toujours le format attendu par l'app, collez **une seule fois** les
+> instructions de [`docs/MJ-PROMPT.md`](docs/MJ-PROMPT.md) dans votre Projet Claude / GPT / Gem.
+> Coût : **zéro token côté app**.
+
 ## Stack
 
 Node.js + Express + Socket.io, écrit en **TypeScript** (backend → `dist/`, frontend → `public/js/`).

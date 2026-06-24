@@ -295,3 +295,22 @@ textarea { resize: vertical; }
   .story-gm { font-size: 1.08rem; }
   .view { padding: 16px 12px 60px; }
 }
+
+/* Case "Je relaie aussi le MJ" dans la modale de connexion */
+.mj-toggle { display: flex; align-items: center; gap: .5rem; margin: .25rem 0 .75rem; font-size: .95rem; cursor: pointer; }
+.mj-toggle input { width: auto; margin: 0; cursor: pointer; }
+
+/* Modale d'aperçu avant diffusion (relais MJ) */
+.preview-body { text-align: left; margin: .5rem 0 1rem; max-height: 50vh; overflow-y: auto; }
+.preview-section-title { font-weight: 600; margin: .8rem 0 .3rem; opacity: .9; }
+.preview-changes { margin: 0; padding-left: 1.2rem; }
+.preview-changes li { margin: .15rem 0; }
+.preview-none { font-style: italic; opacity: .8; }
+.preview-narration { white-space: pre-wrap; padding: .6rem .8rem; border-radius: 8px; background: rgba(0,0,0,.18); }
+
+/* Bandeau "adresse à partager" sur l'accueil */
+.lan-share { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; justify-content: center;
+  margin: 0 auto 1rem; padding: .5rem .9rem; max-width: 640px; border-radius: 10px;
+  background: rgba(0,0,0,.18); }
+.lan-share-label { opacity: .85; font-size: .9rem; }
+.lan-share code { font-size: 1.05rem; font-weight: 600; letter-spacing: .02em; }

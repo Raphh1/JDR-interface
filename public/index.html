@@ -27,6 +27,11 @@
       <h1>Compagnon de JDR</h1>
       <p class="subtitle">Vos aventures, quel que soit l'univers. Le récit se joue ici, le MJ reste dans votre chat Claude.</p>
     </div>
+    <div id="lan-share" class="lan-share hidden">
+      <span class="lan-share-label">📡 Pour tes amis (même wifi)&nbsp;:</span>
+      <code id="lan-url"></code>
+      <button id="lan-copy" class="btn btn-small">📋 Copier</button>
+    </div>
     <div class="home-actions">
       <button id="btn-new-adventure" class="btn btn-primary btn-big">✦ Nouvelle aventure</button>
       <label class="toggle-archived"><input type="checkbox" id="show-archived" /> Afficher les archives</label>
@@ -107,9 +112,9 @@
             <div class="relay-top">
               <button id="copy-briefing" class="btn">📋 Copier le briefing pour Claude</button>
             </div>
-            <textarea id="narration-input" rows="4" placeholder="Colle ici la réponse du MJ… (Ctrl+Entrée pour diffuser)"></textarea>
+            <textarea id="narration-input" rows="4" placeholder="Colle ici la réponse du MJ… (Ctrl+Entrée pour vérifier)"></textarea>
             <div class="relay-actions">
-              <button id="narration-send" class="btn btn-primary">Diffuser à la table</button>
+              <button id="narration-send" class="btn btn-primary">Aperçu puis diffuser</button>
               <button id="ai-generate" class="btn btn-ghost hidden">🤖 Laisser le MJ IA répondre</button>
             </div>
             <div id="round-block" class="round-block hidden"></div>
@@ -173,6 +178,9 @@
       <p>Qui es-tu&nbsp;?</p>
       <select id="name-claim" class="hidden"></select>
       <input type="text" id="name-input" placeholder="Ton nom" />
+      <label id="mj-toggle-row" class="mj-toggle hidden">
+        <input type="checkbox" id="name-mj" /> Je relaie aussi le MJ (Claude)
+      </label>
       <button id="name-confirm" class="btn btn-primary">Rejoindre</button>
     </div>
   </div>
@@ -186,6 +194,18 @@
       <div class="modal-actions">
         <button id="action-cancel" class="btn btn-ghost">Annuler</button>
         <button id="action-confirm" class="btn btn-primary">Verrouiller mon action</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modale "aperçu avant diffusion" (relais MJ) -->
+  <div id="preview-modal" class="modal hidden">
+    <div class="modal-box parchment">
+      <h2>Aperçu avant diffusion</h2>
+      <div id="preview-body" class="preview-body"></div>
+      <div class="modal-actions">
+        <button id="preview-cancel" class="btn btn-ghost">Annuler</button>
+        <button id="preview-confirm" class="btn btn-primary">Diffuser à la table</button>
       </div>
     </div>
   </div>

@@ -744,12 +744,19 @@ function initRelay() {
 async function openSettings() {
   const s = await fetch('/api/ai/status').then((r) => r.json());
   const box = $('#ai-status-box'); const lines: string[] = [];
-  lines.push(s.sdkInstalled ? '<div class="status-ok">✓ SDK Anthropic installé</div>' : '<div class="status-off">○ SDK non installé</div>');
+  const ol = s.ollama || { up: false, host: '', models: [] };
+  lines.push(ol.up ? `<div class="status-ok">✓ Ollama actif (${esc(ol.host)})</div>` : '<div class="status-off">○ Ollama injoignable (local, 0 token)</div>');
+  lines.push(s.sdkInstalled ? '<div class="status-ok">✓ SDK Anthropic installé</div>' : '<div class="status-off">○ SDK Anthropic non installé</div>');
   lines.push(s.keyDetected ? '<div class="status-ok">✓ Clé API détectée</div>' : '<div class="status-off">○ Aucune clé API détectée</div>');
-  lines.push(s.available ? '<div class="status-ok">✓ Module IA prêt</div>' : '<div class="status-off">○ Module IA inactif</div>');
+  lines.push(s.available ? '<div class="status-ok">✓ Module IA prêt</div>' : '<div class="status-off">○ Aucun modèle disponible (lance Ollama ou ajoute une clé)</div>');
   box.innerHTML = lines.join('');
   const select = $('#ai-model-select') as HTMLSelectElement;
-  select.innerHTML = Object.entries(s.models).map(([id, m]: any) => `<option value="${id}">${esc(m.label)}</option>`).join('');
+  const avail: string[] = s.availableModels || [];
+  // Les modèles indisponibles restent listés (le MJ voit quoi installer) mais sont désactivés.
+  select.innerHTML = Object.entries(s.models).map(([id, m]: any) => {
+    const ok = avail.includes(id);
+    return `<option value="${id}"${ok ? '' : ' disabled'}>${esc(m.label)}${ok ? '' : ' — indisponible'}</option>`;
+  }).join('');
   select.value = state.adv?.ai?.model || s.defaultModel;
   select.onchange = () => { if (state.socket && state.adv) state.socket.emit('ai:setModel', { model: select.value }); toast('Modèle mis à jour.'); };
 }

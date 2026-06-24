@@ -1,22 +1,30 @@
-// ai.ts — Module MJ (maître du jeu) intégré, ENTIÈREMENT OPTIONNEL.
-// L'application fonctionne sans clé API ni SDK installé. On charge dotenv et
-// @anthropic-ai/sdk de façon paresseuse et tolérante : si l'un manque, le module
-// se signale simplement comme "indisponible".
+// ai.ts — Module MJ (maître du jeu) intégré, ENTIÈREMENT OPTIONNEL et MULTI-FOURNISSEUR.
+// Deux backends coexistent, choisis par modèle :
+//   - Anthropic (cloud, clé serveur) : @anthropic-ai/sdk en dépendance optionnelle.
+//   - Ollama (local, 0 token, self-hosted) : simple HTTP, AUCUNE dépendance (fetch natif).
+// L'appli tourne sans aucun des deux : le module se signale alors "indisponible".
 
 import { get, put } from './store.js';
 import type { Adventure } from './types.js';
 
-// Typé en `any` car le SDK est une dépendance optionnelle (peut être absent).
+// Typé en `any` côté Anthropic car le SDK est une dépendance optionnelle (peut être absent).
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let AnthropicCtor: any = null;
 let client: any = null;
 let loadError: string | null = null;
 
-export const MODELS: Record<string, { label: string }> = {
-  'claude-haiku-4-5': { label: 'Haiku 4.5 — économique (défaut)' },
-  'claude-sonnet-4-6': { label: 'Sonnet 4.6 — meilleure écriture, plus cher' },
+// --- Ollama (local) ---
+const OLLAMA_HOST = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/+$/, '');
+let ollamaUp = false;
+let ollamaTags: string[] = []; // noms des modèles réellement installés (ex. "dolphin-llama3:latest")
+
+type Provider = 'anthropic' | 'ollama';
+
+export const MODELS: Record<string, { label: string; provider: Provider }> = {
+  'dolphin-llama3': { label: 'Dolphin-Llama3 — local (Ollama), 0 token', provider: 'ollama' },
+  'claude-haiku-4-5': { label: 'Claude Haiku 4.5 — cloud, économique', provider: 'anthropic' },
+  'claude-sonnet-4-6': { label: 'Claude Sonnet 4.6 — cloud, meilleure écriture', provider: 'anthropic' },
 };
-const DEFAULT_MODEL = 'claude-haiku-4-5';
 
 // Nombre de tours récents gardés en clair avant de résumer les plus anciens.
 const RECENT_TURNS = 18;
@@ -26,8 +34,10 @@ export interface AiStatus {
   keyDetected: boolean;
   available: boolean;
   models: typeof MODELS;
+  availableModels: string[];
   defaultModel: string;
   loadError: string | null;
+  ollama: { up: boolean; host: string; models: string[] };
 }
 
 export async function init(): Promise<void> {
@@ -39,41 +49,84 @@ export async function init(): Promise<void> {
     /* pas de dotenv : on lit quand même process.env */
   }
 
+  // Anthropic (optionnel) : SDK + clé.
   try {
     const mod: any = await import('@anthropic-ai/sdk');
     AnthropicCtor = mod.default || mod.Anthropic;
+    if (process.env.ANTHROPIC_API_KEY) {
+      client = new AnthropicCtor({ apiKey: process.env.ANTHROPIC_API_KEY });
+    }
   } catch {
     loadError = 'sdk-missing';
-    return;
   }
 
-  if (process.env.ANTHROPIC_API_KEY) {
-    try {
-      client = new AnthropicCtor({ apiKey: process.env.ANTHROPIC_API_KEY });
-    } catch (e) {
-      loadError = (e as Error).message;
-    }
+  // Ollama (local) : best-effort, n'échoue jamais.
+  await detectOllama();
+}
+
+// Ping Ollama et récupère la liste des modèles installés. Silencieux si absent.
+async function detectOllama(): Promise<void> {
+  try {
+    const resp = await fetch(`${OLLAMA_HOST}/api/tags`);
+    if (!resp.ok) { ollamaUp = false; return; }
+    const data: any = await resp.json();
+    ollamaTags = Array.isArray(data?.models) ? data.models.map((m: any) => String(m?.name || '')) : [];
+    ollamaUp = true;
+  } catch {
+    ollamaUp = false;
+    ollamaTags = [];
   }
+}
+
+function anthropicAvailable(): boolean {
+  return !!client;
+}
+// Un modèle Ollama "dolphin-llama3" est considéré présent si un tag installé matche
+// (avec ou sans suffixe de version, ex. "dolphin-llama3:latest").
+function ollamaModelInstalled(id: string): boolean {
+  return ollamaTags.some((t) => t === id || t.startsWith(id + ':'));
+}
+
+export function isModelAvailable(model?: string): boolean {
+  const m = model ? MODELS[model] : undefined;
+  if (!m) return false;
+  return m.provider === 'anthropic' ? anthropicAvailable() : (ollamaUp && ollamaModelInstalled(model!));
+}
+
+export function availableModels(): string[] {
+  return Object.keys(MODELS).filter((id) => isModelAvailable(id));
+}
+
+export function isAvailable(): boolean {
+  return availableModels().length > 0;
+}
+
+// Par défaut : un modèle local dispo (priorité au 0-token), sinon le premier dispo,
+// sinon dolphin-llama3 (le sélecteur l'affiche, l'utilisateur saura quoi installer).
+export function defaultModel(): string {
+  const avail = availableModels();
+  const local = avail.find((id) => MODELS[id].provider === 'ollama');
+  if (local) return local;
+  if (avail.length) return avail[0];
+  return 'dolphin-llama3';
 }
 
 export function status(): AiStatus {
   return {
     sdkInstalled: !!AnthropicCtor,
     keyDetected: !!process.env.ANTHROPIC_API_KEY,
-    available: !!client,
+    available: isAvailable(),
     models: MODELS,
-    defaultModel: DEFAULT_MODEL,
+    availableModels: availableModels(),
+    defaultModel: defaultModel(),
     loadError,
+    ollama: { up: ollamaUp, host: OLLAMA_HOST, models: ollamaTags },
   };
 }
 
-export function isAvailable(): boolean {
-  return !!client;
-}
-
-// Partie STATIQUE du contexte (thème + fiches + règles), marquée pour le prompt
-// caching d'Anthropic puisqu'elle ne change pas à chaque appel.
-function buildSystemBlocks(adv: Adventure): any[] {
+// Partie STATIQUE du contexte (thème + fiches + règles). Texte commun aux deux backends ;
+// côté Anthropic on l'enveloppe avec cache_control (voir chatAnthropic).
+function buildSystemText(adv: Adventure): string {
   const sheets = adv.characters
     .map((c) => {
       const stats = Object.entries(c.stats || {})
@@ -82,6 +135,7 @@ function buildSystemBlocks(adv: Adventure): any[] {
       const inv = (c.inventory || []).map((i) => i.name).filter(Boolean).join(', ');
       return [
         `- ${c.name || 'Sans nom'} (joué par ${c.playerName})`,
+        c.charClass ? `  Classe: ${c.charClass}` : '',
         `  PV: ${c.hp?.current}/${c.hp?.max}`,
         stats ? `  Stats: ${stats}` : '',
         inv ? `  Inventaire: ${inv}` : '',
@@ -90,7 +144,7 @@ function buildSystemBlocks(adv: Adventure): any[] {
     })
     .join('\n');
 
-  const staticText = [
+  return [
     `Tu es le maître du jeu (MJ) d'une partie de jeu de rôle sur table.`,
     `Univers / thème : ${adv.theme || 'non précisé'}.`,
     adv.description ? `Description du monde : ${adv.description}` : '',
@@ -131,12 +185,9 @@ function buildSystemBlocks(adv: Adventure): any[] {
     `Directives @maj : pv <n> | pv <n>/<max> | pv +<n> | pv -<n> ; +<objet> [xN] ; -<objet> ; <Stat> <n> | <Stat> +<n> ; note: <texte>.`,
     `N'ajoute @maj que s'il y a réellement un changement.`,
   ].filter(Boolean).join('\n');
-
-  return [
-    { type: 'text', text: staticText, cache_control: { type: 'ephemeral' } },
-  ];
 }
 
+// Historique → messages {role, content} (format commun Anthropic / Ollama).
 function buildMessages(adv: Adventure): any[] {
   const story = adv.story || [];
   const recent = story.slice(-RECENT_TURNS);
@@ -164,33 +215,67 @@ function buildMessages(adv: Adventure): any[] {
   return messages;
 }
 
-export async function generate(adventureId: string, model?: string): Promise<string> {
-  if (!client) {
-    if (!status().sdkInstalled) {
-      throw new Error('Le SDK @anthropic-ai/sdk n\'est pas installé sur le serveur.');
-    }
-    throw new Error('Aucune clé API Anthropic configurée sur le serveur.');
-  }
-  const adv = get(adventureId);
-  if (!adv) throw new Error('Aventure introuvable.');
+// Appel bas niveau routé vers le bon backend selon le modèle.
+async function chat(model: string, system: string, messages: any[], maxTokens: number): Promise<string> {
+  const provider = MODELS[model]?.provider;
+  return provider === 'ollama'
+    ? chatOllama(model, system, messages, maxTokens)
+    : chatAnthropic(model, system, messages, maxTokens);
+}
 
-  const chosen = (model && MODELS[model]) ? model
-    : (adv.ai?.model && MODELS[adv.ai.model]) ? adv.ai.model : DEFAULT_MODEL;
-
+async function chatAnthropic(model: string, system: string, messages: any[], maxTokens: number): Promise<string> {
+  if (!client) throw new Error('Aucune clé API Anthropic configurée sur le serveur.');
   const resp = await client.messages.create({
-    model: chosen,
-    max_tokens: 700,
-    system: buildSystemBlocks(adv),
-    messages: buildMessages(adv),
+    model,
+    max_tokens: maxTokens,
+    // Partie statique mise en cache (prompt caching Anthropic).
+    system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+    messages,
   });
-
-  const text = (resp.content || [])
+  return (resp.content || [])
     .filter((b: any) => b.type === 'text')
     .map((b: any) => b.text)
     .join('\n')
     .trim();
+}
 
-  // Condenser l'ancien historique au-delà du seuil (maîtrise des coûts).
+async function chatOllama(model: string, system: string, messages: any[], maxTokens: number): Promise<string> {
+  const resp = await fetch(`${OLLAMA_HOST}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'system', content: system }, ...messages],
+      stream: false,
+      options: { num_predict: maxTokens },
+    }),
+  });
+  if (!resp.ok) throw new Error(`Ollama HTTP ${resp.status} (${OLLAMA_HOST}). Lance « ollama serve » et « ollama pull ${model} ».`);
+  const data: any = await resp.json();
+  return String(data?.message?.content || '').trim();
+}
+
+function resolveModel(adv: Adventure, model?: string): string {
+  if (model && MODELS[model]) return model;
+  if (adv.ai?.model && MODELS[adv.ai.model]) return adv.ai.model;
+  return defaultModel();
+}
+
+export async function generate(adventureId: string, model?: string): Promise<string> {
+  const adv = get(adventureId);
+  if (!adv) throw new Error('Aventure introuvable.');
+
+  const chosen = resolveModel(adv, model);
+  if (!isModelAvailable(chosen)) {
+    if (MODELS[chosen]?.provider === 'ollama') {
+      throw new Error(`Modèle local « ${chosen} » indisponible : vérifie qu'Ollama tourne (${OLLAMA_HOST}) et fais « ollama pull ${chosen} ».`);
+    }
+    throw new Error(anthropicAvailable() ? `Modèle « ${chosen} » indisponible.` : "Aucune clé API Anthropic configurée sur le serveur.");
+  }
+
+  const text = await chat(chosen, buildSystemText(adv), buildMessages(adv), 700);
+
+  // Condenser l'ancien historique au-delà du seuil (maîtrise du contexte/coûts).
   await maybeSummarize(adv, chosen).catch(() => {});
 
   return text || '(réponse vide)';
@@ -205,23 +290,15 @@ async function maybeSummarize(adv: Adventure, model: string): Promise<void> {
     .map((t) => (t.role === 'gm' ? `MJ: ${t.content}` : `${t.author}: ${t.content}`))
     .join('\n');
 
-  const resp = await client.messages.create({
+  const newSummary = await chat(
     model,
-    max_tokens: 400,
-    system: 'Tu condenses un historique de jeu de rôle en un résumé factuel et compact (lieux, PNJ, objectifs, événements clés, état des personnages). Pas de fioritures.',
-    messages: [
-      {
-        role: 'user',
-        content: `${adv.ai?.summary ? `Résumé existant : ${adv.ai.summary}\n\n` : ''}Nouveaux échanges à intégrer :\n${transcript}\n\nProduis un résumé global mis à jour, en quelques phrases.`,
-      },
-    ],
-  });
-
-  const newSummary = (resp.content || [])
-    .filter((b: any) => b.type === 'text')
-    .map((b: any) => b.text)
-    .join(' ')
-    .trim();
+    'Tu condenses un historique de jeu de rôle en un résumé factuel et compact (lieux, PNJ, objectifs, événements clés, état des personnages). Pas de fioritures.',
+    [{
+      role: 'user',
+      content: `${adv.ai?.summary ? `Résumé existant : ${adv.ai.summary}\n\n` : ''}Nouveaux échanges à intégrer :\n${transcript}\n\nProduis un résumé global mis à jour, en quelques phrases.`,
+    }],
+    400,
+  );
 
   if (newSummary) {
     adv.ai = { ...(adv.ai || {}), summary: newSummary };

@@ -66,8 +66,21 @@ sinon vos amis ne pourront pas se connecter. (Réseau « privé » uniquement, p
 
 ## Module MJ IA (optionnel)
 
-L'application fonctionne **entièrement sans IA**. Pour activer un maître du jeu généré directement
-dans l'app :
+L'application fonctionne **entièrement sans IA**. Deux fournisseurs sont supportés et **coexistent** :
+le MJ choisit le modèle à chaud dans **⚙ Paramètres** (les modèles indisponibles y sont grisés).
+
+### Option A — Ollama (local, 0 token, recommandé pour le self-hosted)
+
+Aucune clé, aucun compte, aucune dépendance npm : l'app parle à Ollama en HTTP.
+
+1. Installer [Ollama](https://ollama.com), puis récupérer un modèle non censuré adapté au JDR :
+   `ollama pull dolphin-llama3`
+2. S'assurer qu'Ollama tourne (`ollama serve`, généralement lancé automatiquement).
+3. Relancer `npm start` : le modèle **Dolphin-Llama3 — local** apparaît disponible dans Paramètres.
+
+Hôte par défaut `http://localhost:11434`, surchargé par la variable d'env `OLLAMA_HOST`.
+
+### Option B — Anthropic (cloud, clé serveur)
 
 1. Installer le SDK : `npm install @anthropic-ai/sdk dotenv`
 2. Copier `.env.example` en `.env` et y coller votre clé : `ANTHROPIC_API_KEY=sk-ant-...`
@@ -75,8 +88,8 @@ dans l'app :
 
 La clé n'est **lue que par le serveur de l'hôte** et n'est jamais envoyée aux navigateurs des joueurs.
 
-**Maîtrise des coûts** (intégrée) :
-- Modèle au choix : `claude-haiku-4-5` (défaut, économique) ou `claude-sonnet-4-6` (meilleure écriture).
+**Maîtrise des coûts** (intégrée, pertinente surtout pour l'option Anthropic — Ollama est gratuit) :
+- Modèle au choix : `dolphin-llama3` (local, gratuit), `claude-haiku-4-5` (cloud, économique) ou `claude-sonnet-4-6` (cloud, meilleure écriture).
 - **Prompt caching** sur la partie statique du contexte (thème, fiches, instructions de MJ).
 - **Résumé automatique** de l'historique ancien : seuls les ~18 derniers tours sont envoyés en clair,
   le reste est condensé — on ne renvoie jamais des heures de session brute à chaque appel.

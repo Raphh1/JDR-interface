@@ -229,6 +229,11 @@ function emitJoin(id: string, initial: boolean) {
     loadAiStatusBanner();
   });
 }
+// Liste autoritative des joueurs connectés (noms uniques), affichée dans la topbar.
+function renderPresence(names: string[]) {
+  const el = $('#present-list');
+  el.textContent = names && names.length ? `👥 ${names.join(', ')}` : '';
+}
 function updateTitle() {
   if (!state.adv) return;
   $('#adv-title').textContent = `${state.adv.title}${state.adv.theme ? ` · ${state.adv.theme}` : ''}`;
@@ -276,6 +281,7 @@ function wireSocket(socket: any) {
   socket.on('ai:error', ({ error }: { error: string }) => toast(error));
   socket.on('ai:model', ({ model }: { model: string }) => { if (state.adv) state.adv.ai = { ...(state.adv.ai || { summary: '' }), model }; });
   socket.on('presence', ({ type, name }: { type: string; name: string }) => toast(`${name} ${type === 'join' ? 'a rejoint' : 'a quitté'} la table`));
+  socket.on('presence:list', (names: string[]) => renderPresence(names));
   socket.on('adventures:list', (list: AdventureSummary[]) => { if (!location.hash || location.hash === '#/') drawAdventureList(list); });
   socket.on('disconnect', () => $('#presence').textContent = '⚠ déconnecté…');
   // À la reconnexion, Socket.io ouvre une NOUVELLE connexion serveur (hors room) :

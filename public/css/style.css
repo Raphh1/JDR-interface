@@ -300,6 +300,10 @@ textarea { resize: vertical; }
 .mj-toggle { display: flex; align-items: center; gap: .5rem; margin: .25rem 0 .75rem; font-size: .95rem; cursor: pointer; }
 .mj-toggle input { width: auto; margin: 0; cursor: pointer; }
 
+/* Liste des joueurs connectés (topbar) */
+.present-list { font-size: .85rem; opacity: .8; margin-right: .4rem; max-width: 40vw; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+
 /* Modale d'aperçu avant diffusion (relais MJ) */
 .preview-body { text-align: left; margin: .5rem 0 1rem; max-height: 50vh; overflow-y: auto; }
 .preview-section-title { font-weight: 600; margin: .8rem 0 .3rem; opacity: .9; }

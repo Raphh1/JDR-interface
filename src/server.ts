@@ -12,6 +12,7 @@ import { Server, type Socket } from 'socket.io';
 
 import * as store from './store.js';
 import * as ai from './ai.js';
+import * as presence from './presence.js';
 import { applyGmUpdates, type ApplyResult } from './gmsync.js';
 import type { Adventure, ClassDef } from './types.js';
 
@@ -121,6 +122,10 @@ function touch(adv: Adventure): void {
 function broadcastList(): void {
   io.emit('adventures:list', sortedSummaries());
 }
+// Diffuse la liste autoritative des présents d'une aventure (noms uniques).
+function emitPresence(id: string): void {
+  io.to(id).emit('presence:list', presence.list(id));
+}
 
 // Applique les éléments de setup/màj issus du relais ou de l'IA, puis diffuse.
 function applyAndBroadcast(advId: string, raw: string): { clean: string } {
@@ -175,7 +180,10 @@ io.on('connection', (socket: Socket) => {
     socket.data.advId = advId;          // persisté pour la récupération d'état
     socket.data.playerName = playerName;
     socket.join(advId);
+    const { previousAdvId } = presence.join(advId, socket.id, playerName);
     socket.to(advId).emit('presence', { type: 'join', name: playerName });
+    emitPresence(advId);
+    if (previousAdvId) emitPresence(previousAdvId);
     cb && cb({ adventure: adv });
   });
 
@@ -204,12 +212,14 @@ io.on('connection', (socket: Socket) => {
     io.to(advId!).emit('dice:result', roll);
   });
 
-  // --- Fiches (le joueur édite nom / notes / inventaire / PV ; pas la classe ni les stats) ---
+  // --- Fiches : un joueur n'édite QUE sa propre fiche (nom / notes / inventaire / PV ;
+  // pas la classe ni les stats). Le MJ, lui, modifie les autres via le bloc @maj. ---
   socket.on('character:update', ({ characterId, patch }: { characterId: string; patch: any }) => {
     const adv = requireAdv();
     if (!adv) return;
     const c = adv.characters.find((x) => x.id === characterId);
     if (!c) return;
+    if (c.playerName !== playerName) return;  // propriété : pas le sien → ignoré
     for (const key of ['name', 'notes'] as const) {
       if (typeof patch[key] === 'string') c[key] = patch[key];
     }
@@ -234,6 +244,7 @@ io.on('connection', (socket: Socket) => {
     const c = adv.characters.find((x) => x.id === characterId);
     const cls = adv.classPool.find((x: ClassDef) => x.id === classId);
     if (!c || !cls) return;
+    if (c.playerName !== playerName) return;  // on ne pioche que pour son propre personnage
     c.charClass = cls.name;
     // Stats de départ = base 10 + valeurs de la classe.
     for (const stat of adv.statTemplate) if (!(stat in c.stats)) c.stats[stat] = 10;
@@ -358,7 +369,9 @@ io.on('connection', (socket: Socket) => {
   });
 
   socket.on('disconnect', () => {
+    const advLeft = presence.leave(socket.id);
     if (advId) socket.to(advId).emit('presence', { type: 'leave', name: playerName });
+    if (advLeft) emitPresence(advLeft);
   });
 });
 
